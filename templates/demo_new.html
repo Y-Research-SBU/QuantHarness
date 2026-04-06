@@ -1091,6 +1091,7 @@
                                         <option value="openai" selected>OpenAI</option>
                                         <option value="anthropic">Claude (Anthropic)</option>
                                         <option value="qwen">Qwen</option>
+                                        <option value="minimax">MiniMax</option>
                                     </select>
                                 </div>
                                 
@@ -1122,6 +1123,17 @@
                                     <div class="input-group">
                                         <input type="password" class="form-control" id="qwenApiKeyInput" placeholder="Enter your Qwen API key">
                                         <button class="btn btn-outline-primary" type="button" onclick="updateApiKey('qwen')">
+                                            <i class="fas fa-save"></i> Update
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- MiniMax API Key Input -->
+                                <div class="form-group" id="minimaxApiKeyGroup" style="display: none;">
+                                    <label class="form-label">MiniMax API Key</label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control" id="minimaxApiKeyInput" placeholder="Enter your MiniMax API key">
+                                        <button class="btn btn-outline-primary" type="button" onclick="updateApiKey('minimax')">
                                             <i class="fas fa-save"></i> Update
                                         </button>
                                     </div>
@@ -1495,7 +1507,8 @@
                     const providerNames = {
                         'openai': 'OpenAI',
                         'anthropic': 'Anthropic',
-                        'qwen': 'Qwen'
+                        'qwen': 'Qwen',
+                        'minimax': 'MiniMax'
                     };
                     const providerName = providerNames[provider] || provider;
                     
@@ -1782,12 +1795,14 @@
              const openaiGroup = document.getElementById('openaiApiKeyGroup');
              const anthropicGroup = document.getElementById('anthropicApiKeyGroup');
              const qwenGroup = document.getElementById('qwenApiKeyGroup');
-             
+             const minimaxGroup = document.getElementById('minimaxApiKeyGroup');
+
              // Hide all groups first
              openaiGroup.style.display = 'none';
              anthropicGroup.style.display = 'none';
              qwenGroup.style.display = 'none';
-             
+             minimaxGroup.style.display = 'none';
+
              // Show the selected provider's group
              if (provider === 'openai') {
                  openaiGroup.style.display = 'block';
@@ -1795,6 +1810,8 @@
                  anthropicGroup.style.display = 'block';
              } else if (provider === 'qwen') {
                  qwenGroup.style.display = 'block';
+             } else if (provider === 'minimax') {
+                 minimaxGroup.style.display = 'block';
              }
              
              // Update provider on backend
@@ -1839,6 +1856,8 @@
                  apiKey = document.getElementById('anthropicApiKeyInput').value.trim();
              } else if (actualProvider === 'qwen') {
                  apiKey = document.getElementById('qwenApiKeyInput').value.trim();
+             } else if (actualProvider === 'minimax') {
+                 apiKey = document.getElementById('minimaxApiKeyInput').value.trim();
              }
              
              if (!apiKey) {
@@ -1872,7 +1891,8 @@
                      const providerNames = {
                          'openai': 'OpenAI',
                          'anthropic': 'Anthropic',
-                         'qwen': 'Qwen'
+                         'qwen': 'Qwen',
+                         'minimax': 'MiniMax'
                      };
                      showApiKeySuccess(`${providerNames[actualProvider] || actualProvider} API key updated successfully!`);
                      if (actualProvider === 'openai') {
@@ -1881,6 +1901,8 @@
                          document.getElementById('anthropicApiKeyInput').value = '';
                      } else if (actualProvider === 'qwen') {
                          document.getElementById('qwenApiKeyInput').value = '';
+                     } else if (actualProvider === 'minimax') {
+                         document.getElementById('minimaxApiKeyInput').value = '';
                      }
                      checkApiKeyStatus();
                  } else {

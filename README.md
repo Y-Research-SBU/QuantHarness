@@ -137,6 +137,9 @@ export ANTHROPIC_API_KEY="your_anthropic_api_key_here"
 # For Qwen (DashScope, based in Singapore — delays may occur)
 export DASHSCOPE_API_KEY="your_dashscope_api_key_here"
 
+# For MiniMax (204K context, OpenAI-compatible API)
+export MINIMAX_API_KEY="your_minimax_api_key_here"
+
 ```
 
 
@@ -216,14 +219,21 @@ elif provider == "qwen":
         analyzer.config["agent_llm_model"] = "qwen3-max"
     if not analyzer.config["graph_llm_model"].startswith("qwen"):
         analyzer.config["graph_llm_model"] = "qwen3-vl-plus"
-    
+
+elif provider == "minimax":
+    # Set default MiniMax models (204K context window)
+    if not analyzer.config["agent_llm_model"].startswith("MiniMax"):
+        analyzer.config["agent_llm_model"] = "MiniMax-M2.7"
+    if not analyzer.config["graph_llm_model"].startswith("MiniMax"):
+        analyzer.config["graph_llm_model"] = "MiniMax-M2.7"
+
 else:
     # Set default OpenAI models if not already set to OpenAI models
-    if analyzer.config["agent_llm_model"].startswith(("claude", "qwen")):
+    if analyzer.config["agent_llm_model"].startswith(("claude", "qwen", "MiniMax")):
         analyzer.config["agent_llm_model"] = "gpt-4o-mini"
-    if analyzer.config["graph_llm_model"].startswith(("claude", "qwen")):
+    if analyzer.config["graph_llm_model"].startswith(("claude", "qwen", "MiniMax")):
         analyzer.config["graph_llm_model"] = "gpt-4o"
-        
+
 ```
 
 For live data, we recommend using the web interface as it provides access to real-time market data through yfinance. The system automatically fetches the most recent 30 candlesticks for optimal LLM analysis accuracy.
@@ -272,6 +282,7 @@ This repository was built with the help of the following libraries and framework
 - [**OpenAI**](https://github.com/openai/openai-python)
 - [**Anthropic (Claude)**](https://github.com/anthropics/anthropic-sdk-python)
 - [**Qwen**](https://github.com/QwenLM/Qwen)
+- [**MiniMax**](https://platform.minimaxi.com/) — 204K context, OpenAI-compatible API
 - [**yfinance**](https://github.com/ranaroussi/yfinance)
 - [**Flask**](https://github.com/pallets/flask)
 - [**TechnicalAnalysisAutomation**](https://github.com/neurotrader888/TechnicalAnalysisAutomation/tree/main)

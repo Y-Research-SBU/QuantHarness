@@ -113,11 +113,11 @@ class TradingGraph:
         elif provider == "qwen":
             # First check if API key is provided in config
             api_key = self.config.get("qwen_api_key")
-            
+
             # If not in config, check environment variable
             if not api_key:
                 api_key = os.environ.get("DASHSCOPE_API_KEY")
-            
+
             # Validate the API key
             if not api_key:
                 raise ValueError(
@@ -125,14 +125,36 @@ class TradingGraph:
                     "1. Set environment variable: export DASHSCOPE_API_KEY='your-key-here'\n"
                     "2. Update the config with: config['qwen_api_key'] = 'your-key-here'\n"
                 )
-            
+
             if api_key == "":
                 raise ValueError(
                     "Please provide your actual Qwen API key. "
                     "You can get one from: https://dashscope.console.aliyun.com/"
                 )
+        elif provider == "minimax":
+            # First check if API key is provided in config
+            api_key = self.config.get("minimax_api_key")
+
+            # If not in config, check environment variable
+            if not api_key:
+                api_key = os.environ.get("MINIMAX_API_KEY")
+
+            # Validate the API key
+            if not api_key:
+                raise ValueError(
+                    "MiniMax API key not found. Please set it using one of these methods:\n"
+                    "1. Set environment variable: export MINIMAX_API_KEY='your-key-here'\n"
+                    "2. Update the config with: config['minimax_api_key'] = 'your-key-here'\n"
+                    "3. Use the web interface to update the API key"
+                )
+
+            if api_key == "":
+                raise ValueError(
+                    "Please provide your actual MiniMax API key. "
+                    "You can get one from: https://platform.minimaxi.com/"
+                )
         else:
-            raise ValueError(f"Unsupported provider: {provider}. Must be 'openai', 'anthropic', or 'qwen'")
+            raise ValueError(f"Unsupported provider: {provider}. Must be 'openai', 'anthropic', 'qwen', or 'minimax'")
         
         return api_key
 
@@ -141,17 +163,17 @@ class TradingGraph:
     ) -> BaseChatModel:
         """
         Create an LLM instance based on the provider.
-        
+
         Args:
-            provider: The provider name ("openai", "anthropic", or "qwen")
-            model: The model name (e.g., "gpt-4o", "claude-3-5-sonnet-20241022", "qwen-vl-max-latest")
+            provider: The provider name ("openai", "anthropic", "qwen", or "minimax")
+            model: The model name (e.g., "gpt-4o", "claude-3-5-sonnet-20241022", "qwen-vl-max-latest", "MiniMax-M2.7")
             temperature: The temperature setting for the model
-            
+
         Returns:
             BaseChatModel: An instance of the appropriate LLM class
         """
         api_key = self._get_api_key(provider)
-        
+
         if provider == "openai":
             return ChatOpenAI(
                 model=model,
@@ -174,8 +196,18 @@ class TradingGraph:
                 api_key=api_key,
                 max_retries=4,
             )
+        elif provider == "minimax":
+            # MiniMax uses an OpenAI-compatible API at https://api.minimax.io/v1
+            # Temperature must be in (0.0, 1.0] for MiniMax
+            clamped_temp = max(0.01, min(temperature, 1.0))
+            return ChatOpenAI(
+                model=model,
+                temperature=clamped_temp,
+                api_key=api_key,
+                openai_api_base="https://api.minimax.io/v1",
+            )
         else:
-            raise ValueError(f"Unsupported provider: {provider}. Must be 'openai', 'anthropic', or 'qwen'")
+            raise ValueError(f"Unsupported provider: {provider}. Must be 'openai', 'anthropic', 'qwen', or 'minimax'")
 
     # def _set_tool_nodes(self) -> Dict[str, ToolNode]:
     #     """
@@ -251,11 +283,17 @@ class TradingGraph:
         elif provider == "qwen":
             # Update the config with the new API key
             self.config["qwen_api_key"] = api_key
-            
+
             # Also update the environment variable for consistency
             os.environ["DASHSCOPE_API_KEY"] = api_key
+        elif provider == "minimax":
+            # Update the config with the new API key
+            self.config["minimax_api_key"] = api_key
+
+            # Also update the environment variable for consistency
+            os.environ["MINIMAX_API_KEY"] = api_key
         else:
-            raise ValueError(f"Unsupported provider: {provider}. Must be 'openai', 'anthropic', or 'qwen'")
+            raise ValueError(f"Unsupported provider: {provider}. Must be 'openai', 'anthropic', 'qwen', or 'minimax'")
         
         # Refresh the LLMs with the new API key
         self.refresh_llms()

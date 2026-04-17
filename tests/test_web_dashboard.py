@@ -197,3 +197,83 @@ def test_timeframe_limits(client):
 def test_custom_assets(client):
     resp = client.get("/api/custom-assets")
     assert resp.status_code == 200
+
+
+# ─────────────────────── New dashboard pages ───────────────────────
+
+
+def test_charts_page_200(client):
+    resp = client.get("/dashboard/charts")
+    assert resp.status_code == 200
+    assert b"Charts" in resp.data
+
+
+def test_markets_page_200(client):
+    resp = client.get("/dashboard/markets")
+    assert resp.status_code == 200
+    assert b"Markets" in resp.data
+
+
+def test_equity_page_200(client):
+    resp = client.get("/dashboard/equity")
+    assert resp.status_code == 200
+    assert b"Equity" in resp.data
+
+
+# ─────────────────────── New APIs ───────────────────────
+
+
+@pytest.fixture
+def no_yfinance(monkeypatch):
+    """Prevent live price fetches in tests."""
+    monkeypatch.setattr("web_dashboard._fetch_bulk_prices", lambda symbols: None)
+    monkeypatch.setattr("web_dashboard._fetch_candles", lambda symbol, interval="4h", lookback_days=60: [])
+
+
+def test_api_positions_empty(client, no_yfinance):
+    resp = client.get("/api/positions")
+    assert resp.status_code == 200
+    assert isinstance(json.loads(resp.data), list)
+
+
+def test_api_market_prices(client, no_yfinance):
+    resp = client.get("/api/market-prices")
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert "markets" in data
+    assert isinstance(data["markets"], list)
+    # Every configured market should appear
+    assert len(data["markets"]) > 0
+    first = data["markets"][0]
+    assert "symbol" in first and "display_name" in first and "change_24h" in first
+
+
+def test_api_candles(client, no_yfinance):
+    resp = client.get("/api/candles/BTC-USD?interval=4h")
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data["symbol"] == "BTC-USD"
+    assert "candles" in data
+
+
+def test_api_equity_curve(client, no_yfinance):
+    resp = client.get("/api/equity-curve")
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert "series" in data
+    assert "stats" in data
+    assert "current_value" in data["stats"]
+    assert "sharpe_ratio" in data["stats"]
+    assert "sortino_ratio" in data["stats"]
+
+
+def test_api_trades_top_level(client):
+    resp = client.get("/api/trades?limit=50")
+    assert resp.status_code == 200
+    assert isinstance(json.loads(resp.data), list)
+
+
+def test_api_trades_csv_export(client):
+    resp = client.get("/api/trades.csv")
+    assert resp.status_code == 200
+    assert b"id,entry_time" in resp.data[:80]

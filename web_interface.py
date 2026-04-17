@@ -16,6 +16,16 @@ from trading_graph import TradingGraph
 
 app = Flask(__name__)
 
+# Register dashboard blueprint
+try:
+    from web_dashboard import dashboard_bp
+    app.register_blueprint(dashboard_bp)
+except ImportError:
+    pass  # Dashboard module not available
+
+# Scanner controller (background market scanner)
+from scanner_controller import get_controller
+
 
 class WebTradingAnalyzer:
     def __init__(self):
@@ -1060,6 +1070,51 @@ def validate_api_key():
         return jsonify(validation)
     except Exception as e:
         return jsonify({"valid": False, "error": str(e)})
+
+
+@app.route("/api/start-scanner", methods=["POST"])
+def start_scanner():
+    """Start the background market scanner."""
+    try:
+        data = request.get_json(silent=True) or {}
+        interval_seconds = int(data.get("interval_seconds", 14400))
+        use_agents = bool(data.get("use_agents", False))
+        result = get_controller().start(
+            interval_seconds=interval_seconds,
+            use_agents=use_agents,
+        )
+        return jsonify({"success": result.get("started", False), **result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/stop-scanner", methods=["POST"])
+def stop_scanner():
+    """Stop the background market scanner."""
+    try:
+        result = get_controller().stop()
+        return jsonify({"success": result.get("stopped", False), **result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/status")
+def scanner_status():
+    """Return scanner state, open positions, and P&L summary."""
+    try:
+        return jsonify(get_controller().status())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/scan-once", methods=["POST"])
+def scan_once():
+    """Run a single scan cycle synchronously."""
+    try:
+        results = get_controller().run_once()
+        return jsonify({"success": True, "results": results})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/assets/<path:filename>")

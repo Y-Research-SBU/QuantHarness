@@ -8,3 +8,15 @@ pdf_content.txt
 read.html
 read_files/
 app/
+
+# SQLite paper trading database (local runtime state)
+paper_trades.db
+paper_trades.db-shm
+paper_trades.db-wal
+*.db-shm
+*.db-wal
+
+# pytest cache
+.pytest_cache/
+.coverage
+htmlcov/

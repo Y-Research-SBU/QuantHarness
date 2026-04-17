@@ -5,11 +5,9 @@ numpy
 matplotlib
 mplfinance
 scipy
-TA-Lib
 langchain
 langchain-openai
 langchain-anthropic
-langchain-qwq
 langchain-core
 langgraph
 openai
@@ -17,3 +15,8 @@ anthropic
 ipython
 Pillow
 requests
+apscheduler
+pytest
+pytest-cov
+pytest-mock
+# langchain-qwq is optional (Qwen support). Install manually if needed — may fail on Python 3.10.

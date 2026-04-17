@@ -9,7 +9,10 @@ from typing import Dict
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
-from langchain_qwq import ChatQwen
+try:
+    from langchain_qwq import ChatQwen
+except ImportError:
+    ChatQwen = None  # Python 3.10 compat — Qwen provider unavailable
 from langgraph.prebuilt import ToolNode
 
 from default_config import DEFAULT_CONFIG

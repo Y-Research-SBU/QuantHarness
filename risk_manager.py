@@ -55,6 +55,7 @@ class RiskManager:
         daily_pnl: float,
         consecutive_losses: int,
         open_positions: Optional[List[Dict]] = None,
+        open_position_value: float = 0.0,
     ) -> RiskCheckResult:
         """
         Run all risk checks for a proposed trade.
@@ -62,17 +63,24 @@ class RiskManager:
         Args:
             symbol: Market symbol
             direction: "LONG" or "SHORT"
-            portfolio_balance: Current portfolio balance
+            portfolio_balance: Current portfolio balance (cash, excluding open positions)
             initial_balance: Starting portfolio balance
             daily_pnl: P&L for today
             consecutive_losses: Number of consecutive losing trades
             open_positions: List of currently open positions [{symbol, direction, ...}]
+            open_position_value: Total USD value of open positions for this symbol
+                                (position_size allocated but not yet realized)
         
         Returns:
             RiskCheckResult indicating if trade is allowed
         """
         # Check 1: Circuit breaker (max drawdown)
-        result = self.check_drawdown(portfolio_balance, initial_balance)
+        # Use equity = cash balance + allocated position value, not just cash.
+        # When a trade opens, position_size is subtracted from current_balance,
+        # but the capital is allocated, not lost. Drawdown should reflect
+        # realized losses only.
+        equity = portfolio_balance + open_position_value
+        result = self.check_drawdown(equity, initial_balance)
         if not result.allowed:
             return result
         

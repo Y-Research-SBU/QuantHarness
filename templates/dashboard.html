@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantAgent Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    html, body { background-color: #0b0f17; color: #e5e7eb; }
+    .card { background: #111826; border: 1px solid #1f2937; }
+    .card-header { border-bottom: 1px solid #1f2937; }
+    .pos { color: #10b981; }
+    .neg { color: #ef4444; }
+    .warn { color: #f59e0b; }
+    .muted { color: #6b7280; }
+    .grid-scroll { max-height: 480px; overflow-y: auto; }
+    .monospace { font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace; }
+    th.sortable { cursor: pointer; user-select: none; }
+    th.sortable:hover { color: #93c5fd; }
+    .pulse-dot {
+      width: 8px; height: 8px; border-radius: 9999px;
+      background-color: #10b981;
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+      animation: pulse 2s infinite;
+      display: inline-block;
+    }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+    /* Sparkline canvases */
+    .sparkline { width: 100%; height: 40px; }
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #0b0f17; }
+    ::-webkit-scrollbar-thumb { background: #1f2937; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #374151; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <!-- Header -->
+  <header class="border-b border-gray-800 px-6 py-3 flex items-center justify-between sticky top-0 z-40" style="background: rgba(11, 15, 23, 0.95); backdrop-filter: blur(6px);">
+    <div class="flex items-center gap-3">
+      <div class="text-xl font-bold tracking-wide">
+        <span class="text-emerald-400">Quant</span><span class="text-gray-300">Agent</span>
+        <span class="text-sm muted ml-2">/ Terminal</span>
+      </div>
+    </div>
+    <div class="flex items-center gap-4 text-sm">
+      <span id="last-update" class="muted">—</span>
+      <span class="flex items-center gap-2">
+        <span class="pulse-dot"></span>
+        <span class="muted">LIVE</span>
+      </span>
+    </div>
+  </header>
+
+  <main class="p-4 md:p-6 max-w-[1600px] mx-auto space-y-6">
+
+    <!-- OVERVIEW PANEL -->
+    <section id="overview-panel" class="card rounded-lg p-5">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-sm font-semibold tracking-wider uppercase muted">Overview</h2>
+        <div class="text-xs muted" id="overview-timestamp"></div>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-6 gap-4">
+        <div>
+          <div class="text-xs muted">Total Balance</div>
+          <div id="ov-balance" class="text-2xl font-bold monospace">—</div>
+        </div>
+        <div>
+          <div class="text-xs muted">Total P&amp;L</div>
+          <div id="ov-pnl" class="text-2xl font-bold monospace">—</div>
+          <div id="ov-pnl-pct" class="text-xs monospace">—</div>
+        </div>
+        <div>
+          <div class="text-xs muted">Open Positions</div>
+          <div id="ov-open" class="text-2xl font-bold monospace">—</div>
+        </div>
+        <div>
+          <div class="text-xs muted">Markets</div>
+          <div id="ov-markets" class="text-2xl font-bold monospace">—</div>
+        </div>
+        <div>
+          <div class="text-xs muted">Signals (1h)</div>
+          <div id="ov-signals" class="text-2xl font-bold monospace">—</div>
+        </div>
+        <div>
+          <div class="text-xs muted">Uptime</div>
+          <div id="ov-uptime" class="text-2xl font-bold monospace">—</div>
+          <div id="ov-last-scan" class="text-xs muted">last scan: —</div>
+        </div>
+      </div>
+      <div id="ov-indicator" class="mt-4 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+        <div id="ov-indicator-bar" class="h-full w-0 transition-all bg-emerald-500"></div>
+      </div>
+    </section>
+
+    <!-- MARKET GRID -->
+    <section class="card rounded-lg">
+      <div class="card-header px-5 py-3 flex items-center justify-between">
+        <h2 class="text-sm font-semibold tracking-wider uppercase muted">Market Grid</h2>
+        <div class="text-xs muted"><span id="grid-count">0</span> markets</div>
+      </div>
+      <div id="market-grid" class="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3"></div>
+    </section>
+
+    <!-- STRATEGY PERFORMANCE -->
+    <section class="card rounded-lg">
+      <div class="card-header px-5 py-3 flex items-center justify-between">
+        <h2 class="text-sm font-semibold tracking-wider uppercase muted">Strategy Performance</h2>
+        <div class="text-xs muted">best/worst highlighted</div>
+      </div>
+      <div class="p-4 overflow-x-auto">
+        <table id="strategy-table" class="w-full text-sm">
+          <thead class="text-xs uppercase muted border-b border-gray-800">
+            <tr>
+              <th class="text-left py-2 px-3 sortable" data-col="strategy">Strategy</th>
+              <th class="text-right py-2 px-3 sortable" data-col="total_trades">Trades</th>
+              <th class="text-right py-2 px-3 sortable" data-col="win_rate">Win Rate</th>
+              <th class="text-right py-2 px-3 sortable" data-col="total_pnl">P&amp;L</th>
+              <th class="text-right py-2 px-3 sortable" data-col="avg_win">Avg Win</th>
+              <th class="text-right py-2 px-3 sortable" data-col="avg_loss">Avg Loss</th>
+            </tr>
+          </thead>
+          <tbody id="strategy-tbody"></tbody>
+        </table>
+        <div id="strategy-empty" class="hidden text-center py-8 muted text-sm">
+          No strategy data yet. Trades will populate this table once the runner records closed positions.
+        </div>
+      </div>
+    </section>
+
+    <!-- TRADE LOG + SCANNER STATUS (side by side on lg) -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <section class="card rounded-lg lg:col-span-2">
+        <div class="card-header px-5 py-3 flex items-center justify-between">
+          <h2 class="text-sm font-semibold tracking-wider uppercase muted">Trade Log</h2>
+          <div class="text-xs muted">latest 50</div>
+        </div>
+        <div class="p-4 overflow-x-auto grid-scroll">
+          <table class="w-full text-sm">
+            <thead class="text-xs uppercase muted border-b border-gray-800 sticky top-0 bg-[#111826]">
+              <tr>
+                <th class="text-left py-2 px-3">Symbol</th>
+                <th class="text-left py-2 px-3">Dir</th>
+                <th class="text-left py-2 px-3">Strategy</th>
+                <th class="text-right py-2 px-3">Entry</th>
+                <th class="text-right py-2 px-3">Exit</th>
+                <th class="text-right py-2 px-3">P&amp;L</th>
+                <th class="text-left py-2 px-3">Status</th>
+                <th class="text-left py-2 px-3">Entry Time</th>
+              </tr>
+            </thead>
+            <tbody id="trade-tbody"></tbody>
+          </table>
+          <div id="trade-empty" class="hidden text-center py-8 muted text-sm">
+            No trades recorded yet.
+          </div>
+        </div>
+      </section>
+
+      <section class="card rounded-lg">
+        <div class="card-header px-5 py-3 flex items-center justify-between">
+          <h2 class="text-sm font-semibold tracking-wider uppercase muted">Scanner Status</h2>
+        </div>
+        <div class="p-4 space-y-3 text-sm">
+          <div class="flex justify-between">
+            <span class="muted">Last scan</span>
+            <span id="sc-last-scan" class="monospace">—</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="muted">Snapshots / hour</span>
+            <span id="sc-snap-hour" class="monospace">—</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="muted">Signals / hour</span>
+            <span id="sc-sig-hour" class="monospace">—</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="muted">Markets scanned (1h)</span>
+            <span id="sc-markets-hour" class="monospace">—</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="muted">Total snapshots</span>
+            <span id="sc-total-snap" class="monospace">—</span>
+          </div>
+
+          <div class="mt-4 border-t border-gray-800 pt-3">
+            <div class="text-xs muted uppercase tracking-wider mb-2">Recent Scans</div>
+            <div id="sc-recent" class="space-y-1 text-xs monospace"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- BACKTEST RESULTS -->
+    <section class="card rounded-lg">
+      <div class="card-header px-5 py-3 flex items-center justify-between">
+        <h2 class="text-sm font-semibold tracking-wider uppercase muted">Backtest Results</h2>
+        <div id="bt-file" class="text-xs muted">—</div>
+      </div>
+      <div class="p-4 overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="text-xs uppercase muted border-b border-gray-800">
+            <tr>
+              <th class="text-left py-2 px-3">Symbol</th>
+              <th class="text-left py-2 px-3">Strategy</th>
+              <th class="text-left py-2 px-3">Timeframe</th>
+              <th class="text-right py-2 px-3">Return %</th>
+              <th class="text-right py-2 px-3">Sharpe</th>
+              <th class="text-right py-2 px-3">Max DD %</th>
+              <th class="text-right py-2 px-3">Win Rate</th>
+              <th class="text-right py-2 px-3">Trades</th>
+            </tr>
+          </thead>
+          <tbody id="backtest-tbody"></tbody>
+        </table>
+        <div id="backtest-empty" class="hidden text-center py-8 muted text-sm">
+          No backtest results in <span class="monospace">backtest_results/</span>.
+        </div>
+      </div>
+    </section>
+
+    <footer class="text-center muted text-xs py-6">
+      QuantAgent Dashboard · auto-refresh every 30s · read-only view of paper_trades.db
+    </footer>
+  </main>
+
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>

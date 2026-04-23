@@ -100,6 +100,12 @@ class PaperTradingEngine:
         
         # Risk check
         open_positions = self.get_all_open_positions_summary()
+        # Calculate open position value for this symbol so equity-based
+        # drawdown check doesn't treat allocated capital as a loss.
+        symbol_open_positions = self.get_open_positions(signal.symbol)
+        open_position_value = sum(
+            float(p.get("position_size", 0)) for p in symbol_open_positions
+        )
         risk_check = self.risk_manager.check_trade_allowed(
             symbol=signal.symbol,
             direction=signal.direction,
@@ -108,6 +114,7 @@ class PaperTradingEngine:
             daily_pnl=portfolio["daily_pnl"],
             consecutive_losses=portfolio["consecutive_losses"],
             open_positions=open_positions,
+            open_position_value=open_position_value,
         )
         
         if not risk_check.allowed:
@@ -236,9 +243,15 @@ class PaperTradingEngine:
                 (new_peak - new_balance) / new_peak if new_peak > 0 else 0
             )
             
-            # Circuit breaker
+            # Circuit breaker — include remaining open position values
+            # so allocated capital isn't mistaken for realized losses.
+            remaining_open = conn.execute(
+                "SELECT COALESCE(SUM(position_size), 0) FROM trades WHERE symbol = ? AND status = 'OPEN' AND id != ?",
+                (symbol, trade_id)
+            ).fetchone()[0]
+            equity_after_close = new_balance + float(remaining_open)
             is_cb = 1 if self.risk_manager.is_circuit_breaker_active(
-                new_balance, portfolio["initial_balance"]
+                equity_after_close, portfolio["initial_balance"]
             ) else 0
             
             conn.execute(
@@ -316,9 +329,15 @@ class PaperTradingEngine:
         if not portfolio:
             return
         
-        open_count = len(self.get_open_positions(symbol))
+        open_positions = self.get_open_positions(symbol)
+        open_count = len(open_positions)
+        # Use equity (cash + allocated position value) for accurate snapshots
+        open_position_value = sum(
+            float(p.get("position_size", 0)) for p in open_positions
+        )
+        equity = portfolio["current_balance"] + open_position_value
         drawdown_pct = self.risk_manager.calculate_drawdown_pct(
-            portfolio["current_balance"], portfolio["peak_balance"]
+            equity, portfolio["peak_balance"]
         )
         
         with get_connection(self.db_path) as conn:
@@ -326,7 +345,7 @@ class PaperTradingEngine:
                 """INSERT INTO portfolio_snapshots 
                    (symbol, balance, total_pnl, open_positions, drawdown_pct)
                    VALUES (?, ?, ?, ?, ?)""",
-                (symbol, portfolio["current_balance"], portfolio["total_pnl"],
+                (symbol, equity, portfolio["total_pnl"],
                  open_count, drawdown_pct)
             )
     

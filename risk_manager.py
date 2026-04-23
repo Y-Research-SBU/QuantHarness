@@ -187,22 +187,28 @@ class RiskManager:
         if not my_group:
             return RiskCheckResult(allowed=True, reason="No correlation group", risk_level="low")
         
-        # Check if any open position is in the same group and direction
+        # REL-310: Relaxed correlation check.
+        # Allow up to MAX_CORRELATED_POSITIONS same-direction positions per
+        # correlation group (e.g. 2 crypto longs is OK, 3 is not).
+        MAX_CORRELATED_POSITIONS = 2
         group_symbols = groups.get(my_group, [])
         
+        same_dir_count = 0
         for pos in open_positions:
             pos_symbol = pos.get("symbol", "")
             pos_direction = pos.get("direction", "")
             
             if pos_symbol in group_symbols and pos_symbol != symbol:
                 if pos_direction == direction:
-                    # Same direction in correlated group
-                    return RiskCheckResult(
-                        allowed=False,
-                        reason=f"Correlation block: Already {pos_direction} {pos_symbol} (same group '{my_group}'). "
-                               f"Cannot go {direction} {symbol} simultaneously.",
-                        risk_level="blocked"
-                    )
+                    same_dir_count += 1
+        
+        if same_dir_count >= MAX_CORRELATED_POSITIONS:
+            return RiskCheckResult(
+                allowed=False,
+                reason=f"Correlation block: Already {same_dir_count} {direction} positions in group '{my_group}' "
+                       f"(max {MAX_CORRELATED_POSITIONS}). Cannot add {direction} {symbol}.",
+                risk_level="blocked"
+            )
         
         return RiskCheckResult(allowed=True, reason="Correlation check passed", risk_level="low")
     

@@ -98,11 +98,20 @@ class PaperTradingEngine:
             logger.error(f"No portfolio for {signal.symbol}")
             return None
         
+        # ── Position stacking guard ──────────────────────────────────
+        # Only allow ONE open position per symbol at a time.
+        symbol_open_positions = self.get_open_positions(signal.symbol)
+        if symbol_open_positions:
+            logger.warning(
+                f"Position stacking blocked: {signal.symbol} already has "
+                f"{len(symbol_open_positions)} open position(s). Skipping new {signal.direction} trade."
+            )
+            return None
+
         # Risk check
         open_positions = self.get_all_open_positions_summary()
         # Calculate open position value for this symbol so equity-based
         # drawdown check doesn't treat allocated capital as a loss.
-        symbol_open_positions = self.get_open_positions(signal.symbol)
         open_position_value = sum(
             float(p.get("position_size", 0)) for p in symbol_open_positions
         )
@@ -226,15 +235,20 @@ class PaperTradingEngine:
             new_total_pnl = portfolio["total_pnl"] + pnl
             new_daily_pnl = portfolio["daily_pnl"] + pnl
             
-            # Track wins/losses
+            # Track wins/losses — $0 P&L is breakeven, not a loss (REL-313)
             if pnl > 0:
                 new_winning = portfolio["winning_trades"] + 1
                 new_losing = portfolio["losing_trades"]
                 new_consecutive_losses = 0
-            else:
+            elif pnl < 0:
                 new_winning = portfolio["winning_trades"]
                 new_losing = portfolio["losing_trades"] + 1
                 new_consecutive_losses = portfolio["consecutive_losses"] + 1
+            else:
+                # Breakeven — don't count as win or loss, don't affect streak
+                new_winning = portfolio["winning_trades"]
+                new_losing = portfolio["losing_trades"]
+                new_consecutive_losses = portfolio["consecutive_losses"]
             
             # Update peak balance and drawdown
             new_peak = max(portfolio["peak_balance"], new_balance)
@@ -404,16 +418,20 @@ class PaperTradingEngine:
             perf = dict(perf)
             total_trades = perf["total_trades"] + 1
             winning = perf["winning_trades"] + (1 if pnl > 0 else 0)
-            losing = perf["losing_trades"] + (1 if pnl <= 0 else 0)
+            losing = perf["losing_trades"] + (1 if pnl < 0 else 0)  # $0 = breakeven, not loss
             total_pnl = perf["total_pnl"] + pnl
             
             # Update averages
             if pnl > 0:
                 avg_win = (perf["avg_win"] * perf["winning_trades"] + pnl) / winning if winning > 0 else 0
                 avg_loss = perf["avg_loss"]
-            else:
+            elif pnl < 0:
                 avg_win = perf["avg_win"]
                 avg_loss = (perf["avg_loss"] * perf["losing_trades"] + abs(pnl)) / losing if losing > 0 else 0
+            else:
+                # Breakeven — no change to averages
+                avg_win = perf["avg_win"]
+                avg_loss = perf["avg_loss"]
             
             win_rate = winning / total_trades if total_trades > 0 else 0
             profit_factor = (avg_win * winning) / (avg_loss * losing) if (avg_loss * losing) > 0 else 0
@@ -429,9 +447,9 @@ class PaperTradingEngine:
             )
         else:
             avg_win = pnl if pnl > 0 else 0
-            avg_loss = abs(pnl) if pnl <= 0 else 0
+            avg_loss = abs(pnl) if pnl < 0 else 0
             winning = 1 if pnl > 0 else 0
-            losing = 1 if pnl <= 0 else 0
+            losing = 1 if pnl < 0 else 0
             
             conn.execute(
                 """INSERT INTO strategy_performance 

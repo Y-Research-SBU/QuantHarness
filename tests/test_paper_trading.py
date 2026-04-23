@@ -114,9 +114,12 @@ def test_execute_trade_blocked_by_correlation(tmp_db_path):
     engine = PaperTradingEngine(db_path=tmp_db_path)
     # First trade: LONG BTC
     engine.execute_trade(_mk_signal(symbol="BTC-USD", direction="LONG"), _mk_pos())
-    # Second trade: LONG ETH — same correlation group, should be blocked.
+    # Second trade: LONG ETH — same correlation group, allowed (limit=2).
     t2 = engine.execute_trade(_mk_signal(symbol="ETH-USD", direction="LONG"), _mk_pos())
-    assert t2 is None
+    assert t2 is not None
+    # Third trade: LONG SOL — same group, NOW blocked (3rd same-direction).
+    t3 = engine.execute_trade(_mk_signal(symbol="SOL-USD", direction="LONG"), _mk_pos())
+    assert t3 is None
 
 
 def test_execute_trade_insufficient_balance(tmp_db_path):

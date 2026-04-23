@@ -82,14 +82,27 @@ def test_correlation_no_positions_allowed(rm):
 
 
 def test_correlation_blocks_same_group_same_direction(rm):
-    # BTC and ETH are both in the "crypto" correlation_group
+    # BTC and ETH are both in the "crypto" correlation_group.
+    # With MAX_CORRELATED_POSITIONS=2, a single same-direction position
+    # is allowed; the block kicks in at 2+.
     r = rm.check_correlation(
         symbol="BTC-USD",
         direction="LONG",
         open_positions=[{"symbol": "ETH-USD", "direction": "LONG"}],
     )
-    assert not r.allowed
-    assert "Correlation block" in r.reason
+    assert r.allowed  # 1 existing = under limit of 2
+
+    # Two existing same-direction positions should be blocked.
+    r2 = rm.check_correlation(
+        symbol="SOL-USD",
+        direction="LONG",
+        open_positions=[
+            {"symbol": "ETH-USD", "direction": "LONG"},
+            {"symbol": "BTC-USD", "direction": "LONG"},
+        ],
+    )
+    assert not r2.allowed
+    assert "Correlation block" in r2.reason
 
 
 def test_correlation_allows_same_group_opposite_direction(rm):
@@ -218,14 +231,19 @@ def test_check_trade_blocked_by_daily_loss(rm):
 
 
 def test_check_trade_blocked_by_correlation(rm):
+    # With MAX_CORRELATED_POSITIONS=2, need 2 existing same-direction
+    # positions to trigger a block.
     r = rm.check_trade_allowed(
-        symbol="BTC-USD",
+        symbol="SOL-USD",
         direction="LONG",
         portfolio_balance=10000,
         initial_balance=10000,
         daily_pnl=0,
         consecutive_losses=0,
-        open_positions=[{"symbol": "ETH-USD", "direction": "LONG"}],
+        open_positions=[
+            {"symbol": "ETH-USD", "direction": "LONG"},
+            {"symbol": "BTC-USD", "direction": "LONG"},
+        ],
     )
     assert not r.allowed
 

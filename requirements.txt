@@ -19,4 +19,10 @@ apscheduler
 pytest
 pytest-cov
 pytest-mock
+# Kronos foundation model dependencies (https://github.com/shiyu-coder/Kronos).
+# The Kronos source itself lives in the kronos_forecast/ subdirectory.
+torch>=2.0.0
+einops
+safetensors
+huggingface_hub
 # langchain-qwq is optional (Qwen support). Install manually if needed — may fail on Python 3.10.

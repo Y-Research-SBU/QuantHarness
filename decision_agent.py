@@ -14,6 +14,8 @@ def create_final_trade_decider(llm):
         indicator_report = state["indicator_report"]
         pattern_report = state["pattern_report"]
         trend_report = state["trend_report"]
+        kronos_forecast = state.get("kronos_forecast", "")
+        kronos_data = state.get("kronos_forecast_data") or {}
         time_frame = state["time_frame"]
         stock_name = state["stock_name"]
 
@@ -53,20 +55,31 @@ def create_final_trade_decider(llm):
 
             ---
 
+            ### 4. Kronos Forecast Report:
+            - The Kronos foundation model produces a numerical forecast of the next several candles, expressed as **direction (UP / DOWN / NEUTRAL)**, **predicted percent change vs. last close**, and a **confidence score** (0-1).
+            - Treat Kronos as a **fourth independent vote**.
+            - Weight high-confidence (≥ 0.6) Kronos signals on par with strong indicator/pattern signals; treat low-confidence signals (< 0.3) as noise.
+            - If Kronos disagrees with the indicator/pattern/trend consensus, lower your conviction and prefer tighter risk-reward.
+            - If Kronos aligns with the consensus, bias toward the wider end of the risk-reward range (1.5-1.8).
+
+            ---
+
             ### ✅ Decision Strategy
 
             1. Only act on **confirmed** signals — avoid emerging, speculative, or conflicting signals.
-            2. Prioritize decisions where **all three reports** (Indicator, Pattern, and Trend) **align in the same direction**.
+            2. Prioritize decisions where **all four reports** (Indicator, Pattern, Trend, and Kronos) **align in the same direction**.
             3. Give more weight to:
             - Recent strong momentum (e.g., MACD crossover, RSI breakout)
             - Decisive price action (e.g., breakout candle, rejection wicks, support bounce)
+            - High-confidence Kronos directional forecasts.
             4. If reports disagree:
             - Choose the direction with **stronger and more recent confirmation**
             - Prefer **momentum-backed signals** over weak oscillator hints.
+            - When Kronos agrees with one camp, that camp wins ties.
             5. ⚖️ If the market is in consolidation or reports are mixed:
-            - Default to the **dominant trendline slope** (e.g., SHORT in descending channel).
+            - Default to the **dominant trendline slope** (e.g., SHORT in descending channel), then sanity-check against the Kronos direction.
             - Do not guess direction — choose the **more defensible** side.
-            6. Suggest a reasonable **risk-reward ratio** between **1.2 and 1.8**, based on current volatility and trend strength.
+            6. Suggest a reasonable **risk-reward ratio** between **1.2 and 1.8**, based on current volatility, trend strength, and Kronos confidence.
 
             ---
             ### 🧠 Output Format in json(for system parsing):
@@ -80,14 +93,20 @@ def create_final_trade_decider(llm):
             }}
 
             --------
-            **Technical Indicator Report**  
+            **Technical Indicator Report**
             {indicator_report}
 
-            **Pattern Report**  
+            **Pattern Report**
             {pattern_report}
 
-            **Trend Report**  
+            **Trend Report**
             {trend_report}
+
+            **Kronos Forecast Report**
+            {kronos_forecast or "(no Kronos forecast available — proceed using the three reports above)"}
+
+            **Kronos Structured Signal**
+            direction={kronos_data.get("direction", "N/A")}, magnitude_pct={kronos_data.get("magnitude_pct", "N/A")}, confidence={kronos_data.get("confidence", "N/A")}, source={kronos_data.get("source", "N/A")}
 
         """
 

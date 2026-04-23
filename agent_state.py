@@ -56,6 +56,16 @@ class IndicatorAgentState(TypedDict):
         "Final trend analysis summary, describing structure, directional bias, and technical observations for downstream agents",
     ]
 
+    # Kronos Forecast Agent
+    kronos_forecast: Annotated[
+        str,
+        "Human-readable Kronos forecast summary (direction, magnitude, confidence) consumed by the decision agent prompt",
+    ]
+    kronos_forecast_data: Annotated[
+        dict,
+        "Structured Kronos forecast (direction, magnitude_pct, confidence, predicted path, source) for programmatic consumers",
+    ]
+
     # Final analysis and messaging context
     analysis_results: Annotated[str, "Computed result of the analysis or decision"]
     messages: Annotated[

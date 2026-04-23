@@ -8,6 +8,7 @@ from agent_state import IndicatorAgentState
 from decision_agent import create_final_trade_decider
 from graph_util import TechnicalTools
 from indicator_agent import create_indicator_agent
+from kronos_agent import create_kronos_agent
 from pattern_agent import create_pattern_agent
 from trend_agent import create_trend_agent
 
@@ -29,7 +30,7 @@ class SetGraph:
         # Create analyst nodes
         agent_nodes = {}
         tool_nodes = {}
-        all_agents = ["indicator", "pattern", "trend"]
+        all_agents = ["indicator", "pattern", "trend", "kronos"]
 
         # create nodes for indicator agent
         agent_nodes["indicator"] = create_indicator_agent(self.graph_llm, self.toolkit)
@@ -46,6 +47,9 @@ class SetGraph:
             self.agent_llm, self.graph_llm, self.toolkit
         )
         # tool_nodes["trend"] = self.tool_nodes["trend"]
+
+        # create node for Kronos forecaster (5th agent — purely numerical, no LLM)
+        agent_nodes["kronos"] = create_kronos_agent()
 
         # create nodes for decision agent
         decision_agent_node = create_final_trade_decider(self.graph_llm)

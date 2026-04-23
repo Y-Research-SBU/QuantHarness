@@ -20,3 +20,9 @@ paper_trades.db-wal
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Vendored Kronos foundation model checkout. Cloned at setup time via
+# `git clone https://github.com/shiyu-coder/Kronos kronos_forecast`.
+# kronos_agent.py imports from this directory at runtime but the source
+# is kept out of the repo to avoid bloating it with figures and tests.
+kronos_forecast/

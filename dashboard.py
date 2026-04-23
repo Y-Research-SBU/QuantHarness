@@ -542,5 +542,8 @@ def main():
     app.run(host="127.0.0.1", port=5001, debug=False)
 
 
+# Module-level app instance for gunicorn (gunicorn dashboard:app)
+app = create_app()
+
 if __name__ == "__main__":
     main()

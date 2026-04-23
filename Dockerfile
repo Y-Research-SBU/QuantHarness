@@ -12,6 +12,8 @@ COPY static/ static/
 # Create empty directories the app expects
 RUN mkdir -p backtest_results
 
-EXPOSE ${PORT:-5001}
+ENV PORT=5001
 
-CMD gunicorn dashboard:app --bind 0.0.0.0:${PORT:-5001} --workers 2 --timeout 120
+EXPOSE 5001
+
+CMD ["sh", "-c", "gunicorn dashboard:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120"]

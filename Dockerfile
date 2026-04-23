@@ -2,16 +2,15 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install only dashboard dependencies
 RUN pip install --no-cache-dir flask gunicorn
 
-# Copy only what the dashboard needs
+# Copy only dashboard files
 COPY dashboard.py .
 COPY templates/ templates/
 COPY static/ static/
-COPY paper_trades.db .
-COPY backtest_results/ backtest_results/
-COPY market_config.py .
+
+# Create empty directories the app expects
+RUN mkdir -p backtest_results
 
 EXPOSE ${PORT:-5001}
 

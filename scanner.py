@@ -13,6 +13,7 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 from data_fetcher import fetch_market_data, prepare_kline_dict
+from kronos_agent import KronosForecastAgent
 from market_config import MARKETS, MarketConfig, StrategyType
 from paper_trading import PaperTradingEngine
 from position_sizing import calculate_position_size, calculate_stop_loss
@@ -37,11 +38,15 @@ class MarketScanner:
         db_path: Optional[str] = None,
         use_agents: bool = False,
         agent_config: Optional[Dict] = None,
+        use_kronos: bool = True,
+        kronos_agent: Optional[KronosForecastAgent] = None,
     ):
         self.engine = PaperTradingEngine(db_path=db_path)
         self.use_agents = use_agents
         self.agent_config = agent_config or {}
         self._trading_graph = None
+        self.use_kronos = use_kronos
+        self._kronos_agent = kronos_agent
     
     def _get_trading_graph(self):
         """Lazy-load the trading graph (expensive to initialize)."""
@@ -61,6 +66,33 @@ class MarketScanner:
             except Exception as e:
                 logger.error(f"Failed to initialize trading graph: {e}")
         return self._trading_graph
+
+    def _get_kronos_agent(self) -> Optional[KronosForecastAgent]:
+        """Lazy-construct a shared Kronos forecaster for the scan loop."""
+        if not self.use_kronos:
+            return None
+        if self._kronos_agent is None:
+            try:
+                self._kronos_agent = KronosForecastAgent()
+            except Exception as exc:
+                logger.error(f"Failed to initialize Kronos agent: {exc}")
+                self.use_kronos = False
+                return None
+        return self._kronos_agent
+
+    def _run_kronos_forecast(
+        self, symbol: str, timeframe: str, df: pd.DataFrame
+    ) -> Optional[Dict]:
+        """Run Kronos against the latest bars; never raise."""
+        agent = self._get_kronos_agent()
+        if agent is None:
+            return None
+        try:
+            forecast = agent.predict(df, timeframe=timeframe)
+            return forecast.to_dict()
+        except Exception as exc:
+            logger.warning(f"Kronos forecast failed for {symbol} ({timeframe}): {exc}")
+            return None
     
     def scan_market(
         self,
@@ -87,10 +119,17 @@ class MarketScanner:
                 df.attrs["timeframe"] = timeframe
                 
                 # Run agent analysis if enabled
-                agent_reports = None
+                agent_reports: Optional[Dict] = None
                 if self.use_agents:
                     agent_reports = self._run_agent_analysis(symbol, timeframe, df)
-                
+
+                # Always include Kronos forecast if enabled (cheap, no LLM call).
+                if self.use_kronos:
+                    kronos_data = self._run_kronos_forecast(symbol, timeframe, df)
+                    if kronos_data is not None:
+                        agent_reports = dict(agent_reports or {})
+                        agent_reports["kronos_forecast_data"] = kronos_data
+
                 # Run strategies
                 signals = run_all_strategies(
                     df=df,

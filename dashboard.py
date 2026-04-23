@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from flask import Flask, jsonify, render_template, send_from_directory
+from flask import Flask, jsonify, render_template, request as flask_request, send_from_directory
 
 
 logger = logging.getLogger(__name__)
@@ -505,6 +505,20 @@ def create_app(
     @app.route("/health")
     def health():
         return jsonify({"status": "ok", "db_exists": Path(app.config["DB_PATH"]).exists()})
+
+    @app.route("/api/sync", methods=["POST"])
+    def api_sync():
+        """Accept a SQLite DB upload from the local runner for remote sync."""
+        sync_token = os.environ.get("SYNC_TOKEN", "")
+        if sync_token and flask_request.headers.get("X-Sync-Token") != sync_token:
+            return jsonify({"error": "unauthorized"}), 401
+        if "db" not in flask_request.files:
+            return jsonify({"error": "no db file in request"}), 400
+        db_file = flask_request.files["db"]
+        db_path = Path(app.config["DB_PATH"])
+        db_file.save(str(db_path))
+        logger.info("DB synced from remote (%d bytes)", db_path.stat().st_size)
+        return jsonify({"status": "ok", "size": db_path.stat().st_size})
 
     @app.route("/static/<path:filename>")
     def static_files(filename):

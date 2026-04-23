@@ -282,24 +282,80 @@ def _query_scanner_status(db_path: str) -> Dict[str, Any]:
 # ───────────────────────── Aggregation helpers ─────────────────────────
 
 
+def _compute_unrealized_pnl(db_path: str) -> Dict[str, float]:
+    """Compute unrealized P&L per symbol from open trades.
+
+    Compares entry price to the most recent close price available in
+    portfolio_snapshots or trade data.  Returns {symbol: unrealized_pnl}.
+    """
+    if not Path(db_path).exists():
+        return {}
+    open_trades = _query_trades(db_path, limit=1000, status="OPEN")
+    if not open_trades:
+        return {}
+
+    # Group open trades by symbol
+    by_symbol: Dict[str, list] = {}
+    for t in open_trades:
+        by_symbol.setdefault(t["symbol"], []).append(t)
+
+    # Try to get current prices from the most recent snapshot or trade exit
+    unrealized: Dict[str, float] = {}
+    with _connect(db_path) as conn:
+        for symbol, trades in by_symbol.items():
+            # Best effort: use latest snapshot balance as proxy, or
+            # use the entry price itself (showing $0 unrealized) if no data.
+            # In practice the scanner writes snapshots every cycle.
+            latest_price_row = conn.execute(
+                "SELECT exit_price FROM trades WHERE symbol = ? AND exit_price IS NOT NULL "
+                "ORDER BY exit_time DESC LIMIT 1",
+                (symbol,),
+            ).fetchone()
+            if latest_price_row and latest_price_row[0]:
+                current_price = float(latest_price_row[0])
+            else:
+                # Fall back to entry price of the most recent trade
+                current_price = float(trades[0].get("entry_price", 0))
+
+            sym_pnl = 0.0
+            for t in trades:
+                entry = float(t.get("entry_price", 0))
+                qty = float(t.get("quantity", 0))
+                if t.get("direction") == "LONG":
+                    sym_pnl += (current_price - entry) * qty
+                else:
+                    sym_pnl += (entry - current_price) * qty
+            unrealized[symbol] = sym_pnl
+    return unrealized
+
+
 def build_overview(db_path: str) -> Dict[str, Any]:
     portfolios = _query_portfolios(db_path)
-    total_balance = sum(float(p["current_balance"]) for p in portfolios)
-    total_initial = sum(float(p["initial_balance"]) for p in portfolios)
-    total_pnl = total_balance - total_initial
-    pnl_pct = (total_pnl / total_initial * 100.0) if total_initial > 0 else 0.0
-
     open_positions = _query_trades(db_path, limit=1000, status="OPEN")
 
-    markets_meta = _load_markets_meta()
+    # Equity = cash balance + open position sizes (allocated capital)
+    total_cash = sum(float(p["current_balance"]) for p in portfolios)
+    total_open_value = sum(float(t.get("position_size", 0)) for t in open_positions)
+    total_equity = total_cash + total_open_value
+    total_initial = sum(float(p["initial_balance"]) for p in portfolios)
 
+    # Realized + unrealized
+    realized_pnl = sum(float(p["total_pnl"]) for p in portfolios)
+    unrealized = _compute_unrealized_pnl(db_path)
+    unrealized_pnl = sum(unrealized.values())
+    total_pnl = realized_pnl + unrealized_pnl
+    pnl_pct = (total_pnl / total_initial * 100.0) if total_initial > 0 else 0.0
+
+    markets_meta = _load_markets_meta()
     scanner = _query_scanner_status(db_path)
 
     return {
-        "total_balance": total_balance,
+        "total_balance": total_equity,
         "total_initial": total_initial,
         "total_pnl": total_pnl,
         "total_pnl_pct": pnl_pct,
+        "realized_pnl": realized_pnl,
+        "unrealized_pnl": unrealized_pnl,
         "open_positions": len(open_positions),
         "markets_tracked": len(markets_meta),
         "portfolios": len(portfolios),
@@ -310,18 +366,33 @@ def build_overview(db_path: str) -> Dict[str, Any]:
 
 
 def build_market_grid(db_path: str) -> List[Dict[str, Any]]:
-    """Per-market card data: balance, P&L, drawdown, sparkline, latest signal."""
+    """Per-market card data: equity, P&L (realized+unrealized), drawdown, sparkline, latest signal."""
     portfolios = _query_portfolios(db_path)
     markets_meta = _load_markets_meta()
+    open_trades = _query_trades(db_path, limit=1000, status="OPEN")
+    unrealized_by_sym = _compute_unrealized_pnl(db_path)
 
     by_symbol = {p["symbol"]: p for p in portfolios}
+
+    # Sum open position sizes per symbol
+    open_value_by_sym: Dict[str, float] = {}
+    open_count_by_sym: Dict[str, int] = {}
+    for t in open_trades:
+        s = t["symbol"]
+        open_value_by_sym[s] = open_value_by_sym.get(s, 0) + float(t.get("position_size", 0))
+        open_count_by_sym[s] = open_count_by_sym.get(s, 0) + 1
 
     cards: List[Dict[str, Any]] = []
     for symbol, meta in markets_meta.items():
         pf = by_symbol.get(symbol)
-        initial_balance = float(pf["initial_balance"]) if pf else 10000.0
-        current_balance = float(pf["current_balance"]) if pf else initial_balance
-        total_pnl = float(pf["total_pnl"]) if pf else 0.0
+        initial_balance = float(pf["initial_balance"]) if pf else 833.33
+        cash_balance = float(pf["current_balance"]) if pf else initial_balance
+        open_value = open_value_by_sym.get(symbol, 0.0)
+        equity = cash_balance + open_value
+
+        realized_pnl = float(pf["total_pnl"]) if pf else 0.0
+        unrealized_pnl = unrealized_by_sym.get(symbol, 0.0)
+        total_pnl = realized_pnl + unrealized_pnl
         total_trades = int(pf["total_trades"]) if pf else 0
         max_dd = float(pf["max_drawdown"]) if pf else 0.0
         circuit_breaker = bool(int(pf["is_circuit_breaker_active"])) if pf else False
@@ -338,11 +409,14 @@ def build_market_grid(db_path: str) -> List[Dict[str, Any]]:
                 "symbol": symbol,
                 "display_name": meta.get("display_name", symbol),
                 "category": meta.get("category", "unknown"),
-                "current_balance": current_balance,
+                "current_balance": equity,
                 "initial_balance": initial_balance,
                 "total_pnl": total_pnl,
+                "realized_pnl": realized_pnl,
+                "unrealized_pnl": unrealized_pnl,
                 "pnl_pct": pnl_pct,
                 "total_trades": total_trades,
+                "open_positions": open_count_by_sym.get(symbol, 0),
                 "max_drawdown_pct": max_dd * 100.0,
                 "circuit_breaker": circuit_breaker,
                 "sparkline": sparkline,

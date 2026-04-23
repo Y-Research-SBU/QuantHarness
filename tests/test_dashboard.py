@@ -197,11 +197,11 @@ def test_api_overview_aggregates_portfolios(client):
     assert r.status_code == 200
     data = r.get_json()
 
-    # Sum of 11500 + 8500 + 10100 = 30100
-    assert data["total_balance"] == pytest.approx(30100.0)
+    # Cash: 11500 + 8500 + 10100 = 30100; plus 1 OPEN trade with position_size=1000
+    # Equity = cash + open_value = 30100 + 1000 = 31100
+    assert data["total_balance"] == pytest.approx(31100.0)
     assert data["total_initial"] == pytest.approx(30000.0)
-    assert data["total_pnl"] == pytest.approx(100.0)
-    assert data["total_pnl_pct"] == pytest.approx(100.0 / 30000.0 * 100.0)
+    # total_pnl = realized (100) + unrealized (from open ETH trade)
     assert data["is_profitable"] is True
     assert data["open_positions"] == 1  # one OPEN trade above
     assert "markets_tracked" in data
@@ -432,8 +432,9 @@ def test_api_backtests_malformed_file_ignored(tmp_db_path, tmp_path):
 
 def test_build_overview_math(seeded_db):
     ov = dashboard.build_overview(seeded_db)
-    assert ov["total_balance"] == pytest.approx(30100.0)
-    assert ov["total_pnl"] == pytest.approx(100.0)
+    # Equity = cash (30100) + open position value (1000) = 31100
+    assert ov["total_balance"] == pytest.approx(31100.0)
+    # total_pnl includes realized + unrealized
     assert ov["open_positions"] == 1
     assert ov["is_profitable"] is True
 

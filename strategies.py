@@ -6,6 +6,9 @@ Strategies:
 2. Mean Reversion — Fade RSI extremes (>70 short, <30 long) on 1hr timeframe.
 3. Breakout — Pattern agent detects formation → enter on breakout with volume confirmation.
 4. Multi-Factor — Weighted scoring from all 5 agents. Only trade when 4/5 agree.
+5. Kronos Momentum Confirm — Take Kronos directional bets when indicators/patterns agree.
+6. Kronos Divergence — Contrarian entry when Kronos disagrees with current trend.
+7. Multi-Timeframe Kronos — Trade only when Kronos agrees across multiple horizons.
 """
 
 import json
@@ -14,7 +17,7 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -22,6 +25,33 @@ import pandas as pd
 from market_config import StrategyType
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Shared lazy KronosForecastAgent (used by Kronos-powered strategies)
+# ---------------------------------------------------------------------------
+
+_SHARED_KRONOS_AGENT = None
+
+
+def _get_shared_kronos_agent():
+    """Return a process-wide :class:`KronosForecastAgent` singleton."""
+    global _SHARED_KRONOS_AGENT
+    if _SHARED_KRONOS_AGENT is None:
+        from kronos_agent import KronosForecastAgent  # local import to avoid heavy import at module load
+        _SHARED_KRONOS_AGENT = KronosForecastAgent()
+    return _SHARED_KRONOS_AGENT
+
+
+def _extract_kronos_forecast(agent_reports: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Pull the structured Kronos forecast dict out of the agent_reports payload."""
+    if not agent_reports:
+        return None
+    for key in ("kronos_forecast_data", "kronos", "kronos_data"):
+        value = agent_reports.get(key)
+        if isinstance(value, dict) and "direction" in value:
+            return value
+    return None
 
 
 @dataclass
@@ -659,12 +689,422 @@ class MultiFactorStrategy(BaseStrategy):
         return None
 
 
+class KronosMomentumConfirmStrategy(BaseStrategy):
+    """
+    Take Kronos directional forecasts when classical indicators *and* the
+    pattern agent agree.
+
+    Long entry: Kronos predicts up ≥ ``min_pct`` over the forecast horizon
+    AND RSI is in a non-overbought zone (< ``rsi_max``)
+    AND the pattern report (if present) is bullish — or no pattern report
+        rejects a bullish read.
+
+    Short entry: mirror image (down ≥ ``min_pct``, RSI > ``rsi_min``,
+    pattern report not strongly bullish).
+    """
+
+    BULLISH_PATTERNS = (
+        "ascending triangle",
+        "bull flag",
+        "bullish",
+        "inverse head and shoulders",
+        "double bottom",
+        "rounded bottom",
+        "falling wedge",
+        "morning star",
+        "hammer",
+    )
+    BEARISH_PATTERNS = (
+        "descending triangle",
+        "bear flag",
+        "bearish",
+        "head and shoulders",
+        "double top",
+        "rising wedge",
+        "evening star",
+        "shooting star",
+    )
+
+    def __init__(
+        self,
+        min_pct: float = 2.0,
+        rsi_max: float = 70.0,
+        rsi_min: float = 30.0,
+        min_confidence: float = 0.3,
+        kronos_runner: Optional[Callable] = None,
+    ):
+        super().__init__(StrategyType.KRONOS_MOMENTUM_CONFIRM)
+        self.min_pct = min_pct
+        self.rsi_max = rsi_max
+        self.rsi_min = rsi_min
+        self.min_confidence = min_confidence
+        self._kronos_runner = kronos_runner  # for tests / dependency injection
+
+    # ------------------------------------------------------------------
+
+    def _forecast(
+        self, df: pd.DataFrame, agent_reports: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        cached = _extract_kronos_forecast(agent_reports)
+        if cached is not None:
+            return cached
+        if self._kronos_runner is not None:
+            try:
+                out = self._kronos_runner(df)
+                return out.to_dict() if hasattr(out, "to_dict") else out
+            except Exception as exc:
+                logger.warning("Kronos runner failed in %s: %s", self.strategy_type.value, exc)
+                return None
+        try:
+            forecast = _get_shared_kronos_agent().predict(
+                df, timeframe=df.attrs.get("timeframe")
+            )
+            return forecast.to_dict()
+        except Exception as exc:
+            logger.warning("Kronos prediction failed in %s: %s", self.strategy_type.value, exc)
+            return None
+
+    @staticmethod
+    def _pattern_sentiment(agent_reports: Optional[Dict[str, Any]]) -> str:
+        if not agent_reports:
+            return "unknown"
+        report = agent_reports.get("pattern_report") or ""
+        if not isinstance(report, str):
+            report = str(report)
+        report_l = report.lower()
+        bullish = any(p in report_l for p in KronosMomentumConfirmStrategy.BULLISH_PATTERNS)
+        bearish = any(p in report_l for p in KronosMomentumConfirmStrategy.BEARISH_PATTERNS)
+        if bullish and not bearish:
+            return "bullish"
+        if bearish and not bullish:
+            return "bearish"
+        if not report_l.strip():
+            return "unknown"
+        return "neutral"
+
+    def generate_signal(
+        self,
+        df: pd.DataFrame,
+        indicator_data: Optional[Dict] = None,
+        agent_reports: Optional[Dict[str, str]] = None,
+    ) -> Optional[Signal]:
+        if len(df) < 30:
+            return None
+
+        forecast = self._forecast(df, agent_reports)
+        if not forecast:
+            return None
+
+        magnitude = float(forecast.get("magnitude_pct", 0.0))
+        confidence = float(forecast.get("confidence", 0.0))
+        if confidence < self.min_confidence:
+            return None
+
+        indicators = indicator_data or self._compute_indicators(df)
+        rsi = float(indicators.get("rsi", 50.0))
+        atr = float(indicators.get("atr", df["Close"].iloc[-1] * 0.02))
+        current_price = float(df["Close"].iloc[-1])
+        sentiment = self._pattern_sentiment(agent_reports)
+
+        # LONG conditions
+        if magnitude >= self.min_pct and rsi < self.rsi_max and sentiment != "bearish":
+            stop_loss = current_price - 2 * atr
+            take_profit = current_price + max(2 * atr, current_price * magnitude / 100.0)
+            rr = (take_profit - current_price) / max(current_price - stop_loss, 1e-9)
+            strength = float(np.clip(0.5 * confidence + 0.5 * min(1.0, magnitude / 5.0), 0.0, 1.0))
+            return Signal(
+                direction="LONG",
+                strength=strength,
+                strategy=self.strategy_type,
+                symbol=df.attrs.get("symbol", "UNKNOWN"),
+                timeframe=df.attrs.get("timeframe", "1h"),
+                entry_price=current_price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                risk_reward_ratio=rr,
+                reasoning=(
+                    f"Kronos predicts {magnitude:+.2f}% (conf {confidence:.2f}); "
+                    f"RSI={rsi:.1f} (< {self.rsi_max}); pattern sentiment={sentiment}."
+                ),
+                metadata={**indicators, "kronos": forecast},
+            )
+
+        # SHORT conditions
+        if magnitude <= -self.min_pct and rsi > self.rsi_min and sentiment != "bullish":
+            stop_loss = current_price + 2 * atr
+            take_profit = current_price - max(2 * atr, current_price * abs(magnitude) / 100.0)
+            rr = (current_price - take_profit) / max(stop_loss - current_price, 1e-9)
+            strength = float(
+                np.clip(0.5 * confidence + 0.5 * min(1.0, abs(magnitude) / 5.0), 0.0, 1.0)
+            )
+            return Signal(
+                direction="SHORT",
+                strength=strength,
+                strategy=self.strategy_type,
+                symbol=df.attrs.get("symbol", "UNKNOWN"),
+                timeframe=df.attrs.get("timeframe", "1h"),
+                entry_price=current_price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                risk_reward_ratio=rr,
+                reasoning=(
+                    f"Kronos predicts {magnitude:+.2f}% (conf {confidence:.2f}); "
+                    f"RSI={rsi:.1f} (> {self.rsi_min}); pattern sentiment={sentiment}."
+                ),
+                metadata={**indicators, "kronos": forecast},
+            )
+
+        return None
+
+
+class KronosDivergenceStrategy(BaseStrategy):
+    """
+    Contrarian strategy: trade *against* the prevailing trend when Kronos
+    disagrees with strong conviction.
+
+    Trend bullish (price > SMA20 > SMA50) but Kronos predicts DOWN with
+    high confidence → SHORT (mean-reversion / exhaustion play).
+    Trend bearish but Kronos predicts UP with high confidence → LONG.
+    """
+
+    def __init__(
+        self,
+        min_pct: float = 1.0,
+        min_confidence: float = 0.4,
+        kronos_runner: Optional[Callable] = None,
+    ):
+        super().__init__(StrategyType.KRONOS_DIVERGENCE)
+        self.min_pct = min_pct
+        self.min_confidence = min_confidence
+        self._kronos_runner = kronos_runner
+
+    def _forecast(self, df: pd.DataFrame, agent_reports: Optional[Dict[str, Any]]):
+        cached = _extract_kronos_forecast(agent_reports)
+        if cached is not None:
+            return cached
+        if self._kronos_runner is not None:
+            try:
+                out = self._kronos_runner(df)
+                return out.to_dict() if hasattr(out, "to_dict") else out
+            except Exception as exc:
+                logger.warning("Kronos runner failed in %s: %s", self.strategy_type.value, exc)
+                return None
+        try:
+            forecast = _get_shared_kronos_agent().predict(
+                df, timeframe=df.attrs.get("timeframe")
+            )
+            return forecast.to_dict()
+        except Exception as exc:
+            logger.warning("Kronos prediction failed in %s: %s", self.strategy_type.value, exc)
+            return None
+
+    def generate_signal(
+        self,
+        df: pd.DataFrame,
+        indicator_data: Optional[Dict] = None,
+        agent_reports: Optional[Dict[str, str]] = None,
+    ) -> Optional[Signal]:
+        if len(df) < 50:
+            return None
+
+        forecast = self._forecast(df, agent_reports)
+        if not forecast:
+            return None
+
+        confidence = float(forecast.get("confidence", 0.0))
+        magnitude = float(forecast.get("magnitude_pct", 0.0))
+        if confidence < self.min_confidence:
+            return None
+
+        indicators = indicator_data or self._compute_indicators(df)
+        current_price = float(df["Close"].iloc[-1])
+        sma_20 = float(indicators.get("sma_20", current_price))
+        sma_50 = float(indicators.get("sma_50", current_price))
+        atr = float(indicators.get("atr", current_price * 0.02))
+
+        uptrend = current_price > sma_20 > sma_50
+        downtrend = current_price < sma_20 < sma_50
+
+        # Bullish trend but Kronos says DOWN → contrarian SHORT
+        if uptrend and magnitude <= -self.min_pct:
+            stop_loss = current_price + 1.5 * atr
+            take_profit = max(sma_20, current_price - max(2 * atr, abs(magnitude) / 100.0 * current_price))
+            if take_profit >= current_price:
+                take_profit = current_price - 2 * atr
+            rr = (current_price - take_profit) / max(stop_loss - current_price, 1e-9)
+            strength = float(np.clip(0.4 + 0.6 * confidence, 0.0, 1.0))
+            return Signal(
+                direction="SHORT",
+                strength=strength,
+                strategy=self.strategy_type,
+                symbol=df.attrs.get("symbol", "UNKNOWN"),
+                timeframe=df.attrs.get("timeframe", "1h"),
+                entry_price=current_price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                risk_reward_ratio=rr,
+                reasoning=(
+                    f"Divergence SHORT: uptrend (price {current_price:.2f} > SMA20 {sma_20:.2f} > SMA50 {sma_50:.2f})"
+                    f" but Kronos predicts {magnitude:+.2f}% (conf {confidence:.2f})."
+                ),
+                metadata={**indicators, "kronos": forecast},
+            )
+
+        # Bearish trend but Kronos says UP → contrarian LONG
+        if downtrend and magnitude >= self.min_pct:
+            stop_loss = current_price - 1.5 * atr
+            take_profit = min(sma_20, current_price + max(2 * atr, magnitude / 100.0 * current_price))
+            if take_profit <= current_price:
+                take_profit = current_price + 2 * atr
+            rr = (take_profit - current_price) / max(current_price - stop_loss, 1e-9)
+            strength = float(np.clip(0.4 + 0.6 * confidence, 0.0, 1.0))
+            return Signal(
+                direction="LONG",
+                strength=strength,
+                strategy=self.strategy_type,
+                symbol=df.attrs.get("symbol", "UNKNOWN"),
+                timeframe=df.attrs.get("timeframe", "1h"),
+                entry_price=current_price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                risk_reward_ratio=rr,
+                reasoning=(
+                    f"Divergence LONG: downtrend (price {current_price:.2f} < SMA20 {sma_20:.2f} < SMA50 {sma_50:.2f})"
+                    f" but Kronos predicts {magnitude:+.2f}% (conf {confidence:.2f})."
+                ),
+                metadata={**indicators, "kronos": forecast},
+            )
+
+        return None
+
+
+class MultiTimeframeKronosStrategy(BaseStrategy):
+    """
+    Run Kronos at several forecast horizons on the same OHLCV series and only
+    trade when *all* horizons agree on direction with sufficient confidence.
+
+    This is a pragmatic stand-in for true multi-timeframe data (which would
+    require fetching 1h/4h/1d frames in lockstep and is awkward in
+    backtesting). Different forecast horizons surface short-term and
+    medium-term views from the same model and provide a useful agreement
+    filter.
+    """
+
+    def __init__(
+        self,
+        horizons: Tuple[int, ...] = (6, 12, 24),
+        min_pct: float = 0.5,
+        min_confidence: float = 0.25,
+        kronos_runner: Optional[Callable] = None,
+    ):
+        super().__init__(StrategyType.MULTI_TIMEFRAME_KRONOS)
+        self.horizons = horizons
+        self.min_pct = min_pct
+        self.min_confidence = min_confidence
+        self._kronos_runner = kronos_runner
+
+    def _forecast(self, df: pd.DataFrame, horizon: int) -> Optional[Dict[str, Any]]:
+        if self._kronos_runner is not None:
+            try:
+                out = self._kronos_runner(df, horizon)
+                return out.to_dict() if hasattr(out, "to_dict") else out
+            except Exception as exc:
+                logger.warning("Kronos runner failed in MTF: %s", exc)
+                return None
+        try:
+            forecast = _get_shared_kronos_agent().predict(
+                df, horizon=horizon, timeframe=df.attrs.get("timeframe")
+            )
+            return forecast.to_dict()
+        except Exception as exc:
+            logger.warning("Kronos prediction failed in MTF: %s", exc)
+            return None
+
+    @staticmethod
+    def _direction_from_pct(magnitude_pct: float, threshold: float) -> str:
+        if magnitude_pct > threshold:
+            return "UP"
+        if magnitude_pct < -threshold:
+            return "DOWN"
+        return "NEUTRAL"
+
+    def generate_signal(
+        self,
+        df: pd.DataFrame,
+        indicator_data: Optional[Dict] = None,
+        agent_reports: Optional[Dict[str, str]] = None,
+    ) -> Optional[Signal]:
+        if len(df) < 50:
+            return None
+
+        forecasts: List[Dict[str, Any]] = []
+        for h in self.horizons:
+            f = self._forecast(df, h)
+            if f is None:
+                return None
+            forecasts.append(f)
+
+        directions = [self._direction_from_pct(float(f.get("magnitude_pct", 0.0)), self.min_pct) for f in forecasts]
+        confidences = [float(f.get("confidence", 0.0)) for f in forecasts]
+
+        if any(c < self.min_confidence for c in confidences):
+            return None
+
+        if all(d == "UP" for d in directions):
+            agreed_direction = "LONG"
+        elif all(d == "DOWN" for d in directions):
+            agreed_direction = "SHORT"
+        else:
+            return None
+
+        indicators = indicator_data or self._compute_indicators(df)
+        current_price = float(df["Close"].iloc[-1])
+        atr = float(indicators.get("atr", current_price * 0.02))
+
+        avg_magnitude = float(np.mean([abs(float(f.get("magnitude_pct", 0.0))) for f in forecasts]))
+        avg_confidence = float(np.mean(confidences))
+        strength = float(np.clip(0.5 * avg_confidence + 0.5 * min(1.0, avg_magnitude / 5.0), 0.0, 1.0))
+
+        if agreed_direction == "LONG":
+            stop_loss = current_price - 2 * atr
+            take_profit = current_price + max(3 * atr, current_price * avg_magnitude / 100.0)
+            rr = (take_profit - current_price) / max(current_price - stop_loss, 1e-9)
+        else:
+            stop_loss = current_price + 2 * atr
+            take_profit = current_price - max(3 * atr, current_price * avg_magnitude / 100.0)
+            rr = (current_price - take_profit) / max(stop_loss - current_price, 1e-9)
+
+        return Signal(
+            direction=agreed_direction,
+            strength=strength,
+            strategy=self.strategy_type,
+            symbol=df.attrs.get("symbol", "UNKNOWN"),
+            timeframe=df.attrs.get("timeframe", "1h"),
+            entry_price=current_price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            risk_reward_ratio=rr,
+            reasoning=(
+                f"Multi-Timeframe Kronos {agreed_direction}: horizons {list(self.horizons)} all "
+                f"agree (avg mag {avg_magnitude:.2f}%, avg conf {avg_confidence:.2f})."
+            ),
+            metadata={
+                **indicators,
+                "kronos_horizons": list(self.horizons),
+                "kronos_forecasts": forecasts,
+            },
+        )
+
+
 # Strategy registry
 STRATEGIES: Dict[StrategyType, BaseStrategy] = {
     StrategyType.MOMENTUM: MomentumStrategy(),
     StrategyType.MEAN_REVERSION: MeanReversionStrategy(),
     StrategyType.BREAKOUT: BreakoutStrategy(),
     StrategyType.MULTI_FACTOR: MultiFactorStrategy(),
+    StrategyType.KRONOS_MOMENTUM_CONFIRM: KronosMomentumConfirmStrategy(),
+    StrategyType.KRONOS_DIVERGENCE: KronosDivergenceStrategy(),
+    StrategyType.MULTI_TIMEFRAME_KRONOS: MultiTimeframeKronosStrategy(),
 }
 
 

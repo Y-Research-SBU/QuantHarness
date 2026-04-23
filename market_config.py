@@ -20,6 +20,10 @@ class StrategyType(str, Enum):
     MEAN_REVERSION = "mean_reversion"
     BREAKOUT = "breakout"
     MULTI_FACTOR = "multi_factor"
+    # Kronos-powered strategies (see strategies.py)
+    KRONOS_MOMENTUM_CONFIRM = "kronos_momentum_confirm"
+    KRONOS_DIVERGENCE = "kronos_divergence"
+    MULTI_TIMEFRAME_KRONOS = "multi_timeframe_kronos"
 
 
 @dataclass
@@ -37,13 +41,25 @@ class MarketConfig:
 
 
 # All supported markets
+_CRYPTO_DEFAULT_STRATEGIES = [
+    StrategyType.MOMENTUM,
+    StrategyType.MEAN_REVERSION,
+    StrategyType.BREAKOUT,
+    StrategyType.MULTI_FACTOR,
+    StrategyType.KRONOS_MOMENTUM_CONFIRM,
+    StrategyType.KRONOS_DIVERGENCE,
+    StrategyType.MULTI_TIMEFRAME_KRONOS,
+]
+
+
 MARKETS: Dict[str, MarketConfig] = {
-    # Crypto
+    # Crypto — Kronos strategies enabled by default
     "BTC-USD": MarketConfig(
         symbol="BTC-USD",
         display_name="Bitcoin",
         category=MarketCategory.CRYPTO,
         timeframes=["4h", "1h"],
+        enabled_strategies=list(_CRYPTO_DEFAULT_STRATEGIES),
         scan_interval_hours=4.0,
         correlation_group="crypto",
     ),
@@ -52,6 +68,7 @@ MARKETS: Dict[str, MarketConfig] = {
         display_name="Ethereum",
         category=MarketCategory.CRYPTO,
         timeframes=["4h", "1h"],
+        enabled_strategies=list(_CRYPTO_DEFAULT_STRATEGIES),
         scan_interval_hours=4.0,
         correlation_group="crypto",
     ),
@@ -60,6 +77,7 @@ MARKETS: Dict[str, MarketConfig] = {
         display_name="Solana",
         category=MarketCategory.CRYPTO,
         timeframes=["4h", "1h"],
+        enabled_strategies=list(_CRYPTO_DEFAULT_STRATEGIES),
         scan_interval_hours=4.0,
         correlation_group="crypto",
     ),

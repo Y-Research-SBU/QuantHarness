@@ -72,26 +72,30 @@ class Signal:
 
 class BaseStrategy(ABC):
     """Abstract base class for all trading strategies."""
-    
+
     def __init__(self, strategy_type: StrategyType):
         self.strategy_type = strategy_type
         self.enabled = True
-    
+
     @abstractmethod
     def generate_signal(
         self,
         df: pd.DataFrame,
         indicator_data: Optional[Dict] = None,
         agent_reports: Optional[Dict[str, str]] = None,
+        adaptive_params: Optional[Dict[str, float]] = None,
     ) -> Optional[Signal]:
         """
         Generate a trading signal from market data and optional agent reports.
-        
+
         Args:
             df: OHLCV DataFrame
             indicator_data: Pre-computed indicators (RSI, MACD, etc.)
             agent_reports: Reports from indicator/pattern/trend/decision agents
-        
+            adaptive_params: Optional tuned params from the self-improver
+                (e.g. rsi_overbought/oversold, sl_atr_mult, tp_atr_mult).
+                Strategies fall back to their own defaults when absent.
+
         Returns:
             Signal if trade opportunity found, None otherwise
         """
@@ -266,40 +270,45 @@ class MomentumStrategy(BaseStrategy):
     Momentum strategy: Follow trends on 4hr/daily timeframes.
     Enter on pullbacks in trend direction.
     """
-    
+
     def __init__(self):
         super().__init__(StrategyType.MOMENTUM)
-    
+
     def generate_signal(
         self,
         df: pd.DataFrame,
         indicator_data: Optional[Dict] = None,
         agent_reports: Optional[Dict[str, str]] = None,
+        adaptive_params: Optional[Dict[str, float]] = None,
     ) -> Optional[Signal]:
         if len(df) < 50:
             return None
-        
+
         indicators = indicator_data or self._compute_indicators(df)
         close = df["Close"].values
         current_price = float(close[-1])
-        
+
         rsi = indicators.get("rsi", 50.0)
         macd_hist = indicators.get("macd_hist", 0.0)
         sma_20 = indicators.get("sma_20", current_price)
         sma_50 = indicators.get("sma_50", current_price)
         atr = indicators.get("atr", current_price * 0.02)
-        
+
+        # L2: allow self-improver to tune SL/TP ATR multipliers.
+        sl_mult = float((adaptive_params or {}).get("sl_atr_mult", 2.0))
+        tp_mult = float((adaptive_params or {}).get("tp_atr_mult", 3.0))
+
         # Trend direction: price above both SMAs = uptrend
         uptrend = current_price > sma_20 and sma_20 > sma_50
         downtrend = current_price < sma_20 and sma_20 < sma_50
-        
+
         # Pullback detection: RSI in moderate zone
         bullish_pullback = uptrend and 40 <= rsi <= 60 and macd_hist > 0
         bearish_pullback = downtrend and 40 <= rsi <= 60 and macd_hist < 0
-        
+
         if bullish_pullback:
-            stop_loss = current_price - 2 * atr
-            take_profit = current_price + 3 * atr
+            stop_loss = current_price - sl_mult * atr
+            take_profit = current_price + tp_mult * atr
             rr = (take_profit - current_price) / (current_price - stop_loss) if current_price > stop_loss else 1.5
             
             strength = min(1.0, (rsi - 30) / 40 * 0.5 + (0.5 if macd_hist > 0 else 0))
@@ -320,12 +329,12 @@ class MomentumStrategy(BaseStrategy):
             )
         
         elif bearish_pullback:
-            stop_loss = current_price + 2 * atr
-            take_profit = current_price - 3 * atr
+            stop_loss = current_price + sl_mult * atr
+            take_profit = current_price - tp_mult * atr
             rr = (current_price - take_profit) / (stop_loss - current_price) if stop_loss > current_price else 1.5
-            
+
             strength = min(1.0, (70 - rsi) / 40 * 0.5 + (0.5 if macd_hist < 0 else 0))
-            
+
             return Signal(
                 direction="SHORT",
                 strength=strength,
@@ -340,7 +349,7 @@ class MomentumStrategy(BaseStrategy):
                           f"Price below SMA20({sma_20:.2f}) and SMA50({sma_50:.2f})",
                 metadata=indicators,
             )
-        
+
         return None
 
 
@@ -350,34 +359,41 @@ class MeanReversionStrategy(BaseStrategy):
     RSI > 70 → short, RSI < 30 → long.
     Best on 1hr timeframe.
     """
-    
+
     RSI_OVERBOUGHT = 70
     RSI_OVERSOLD = 30
-    
+
     def __init__(self):
         super().__init__(StrategyType.MEAN_REVERSION)
-    
+
     def generate_signal(
         self,
         df: pd.DataFrame,
         indicator_data: Optional[Dict] = None,
         agent_reports: Optional[Dict[str, str]] = None,
+        adaptive_params: Optional[Dict[str, float]] = None,
     ) -> Optional[Signal]:
         if len(df) < 20:
             return None
-        
+
         indicators = indicator_data or self._compute_indicators(df)
         close = df["Close"].values
         current_price = float(close[-1])
-        
+
         rsi = indicators.get("rsi", 50.0)
         stoch_k = indicators.get("stoch_k", 50.0)
         atr = indicators.get("atr", current_price * 0.02)
         sma_20 = indicators.get("sma_20", current_price)
-        
+
+        # L2: allow self-improver to tune RSI thresholds + SL distance.
+        params = adaptive_params or {}
+        overbought = float(params.get("rsi_overbought", self.RSI_OVERBOUGHT))
+        oversold = float(params.get("rsi_oversold", self.RSI_OVERSOLD))
+        sl_mult = float(params.get("sl_atr_mult", 1.5))
+
         # Overbought → SHORT
-        if rsi > self.RSI_OVERBOUGHT and stoch_k > 80:
-            stop_loss = current_price + 1.5 * atr
+        if rsi > overbought and stoch_k > 80:
+            stop_loss = current_price + sl_mult * atr
             take_profit = sma_20  # Revert to mean (SMA20)
             rr = abs(current_price - take_profit) / abs(stop_loss - current_price) if stop_loss != current_price else 1.0
             
@@ -399,8 +415,8 @@ class MeanReversionStrategy(BaseStrategy):
             )
         
         # Oversold → LONG
-        elif rsi < self.RSI_OVERSOLD and stoch_k < 20:
-            stop_loss = current_price - 1.5 * atr
+        elif rsi < oversold and stoch_k < 20:
+            stop_loss = current_price - sl_mult * atr
             take_profit = sma_20  # Revert to mean
             rr = abs(take_profit - current_price) / abs(current_price - stop_loss) if current_price != stop_loss else 1.0
             
@@ -432,22 +448,23 @@ class BreakoutStrategy(BaseStrategy):
     
     def __init__(self):
         super().__init__(StrategyType.BREAKOUT)
-    
+
     def generate_signal(
         self,
         df: pd.DataFrame,
         indicator_data: Optional[Dict] = None,
         agent_reports: Optional[Dict[str, str]] = None,
+        adaptive_params: Optional[Dict[str, float]] = None,
     ) -> Optional[Signal]:
         if len(df) < 30:
             return None
-        
+
         indicators = indicator_data or self._compute_indicators(df)
         close = df["Close"].values
         high = df["High"].values
         low = df["Low"].values
         current_price = float(close[-1])
-        
+
         atr = indicators.get("atr", current_price * 0.02)
         
         # Detect consolidation: recent range is narrow
@@ -545,16 +562,17 @@ class MultiFactorStrategy(BaseStrategy):
     
     def __init__(self):
         super().__init__(StrategyType.MULTI_FACTOR)
-    
+
     def generate_signal(
         self,
         df: pd.DataFrame,
         indicator_data: Optional[Dict] = None,
         agent_reports: Optional[Dict[str, str]] = None,
+        adaptive_params: Optional[Dict[str, float]] = None,
     ) -> Optional[Signal]:
         if len(df) < 30:
             return None
-        
+
         indicators = indicator_data or self._compute_indicators(df)
         close = df["Close"].values
         current_price = float(close[-1])
@@ -787,6 +805,7 @@ class KronosMomentumConfirmStrategy(BaseStrategy):
         df: pd.DataFrame,
         indicator_data: Optional[Dict] = None,
         agent_reports: Optional[Dict[str, str]] = None,
+        adaptive_params: Optional[Dict[str, float]] = None,
     ) -> Optional[Signal]:
         if len(df) < 30:
             return None
@@ -797,7 +816,9 @@ class KronosMomentumConfirmStrategy(BaseStrategy):
 
         magnitude = float(forecast.get("magnitude_pct", 0.0))
         confidence = float(forecast.get("confidence", 0.0))
-        if confidence < self.min_confidence:
+        # L2: tuned confidence floor overrides the constructor default.
+        min_conf = float((adaptive_params or {}).get("kronos_min_confidence", self.min_confidence))
+        if confidence < min_conf:
             return None
 
         indicators = indicator_data or self._compute_indicators(df)
@@ -903,6 +924,7 @@ class KronosDivergenceStrategy(BaseStrategy):
         df: pd.DataFrame,
         indicator_data: Optional[Dict] = None,
         agent_reports: Optional[Dict[str, str]] = None,
+        adaptive_params: Optional[Dict[str, float]] = None,
     ) -> Optional[Signal]:
         if len(df) < 50:
             return None
@@ -913,7 +935,8 @@ class KronosDivergenceStrategy(BaseStrategy):
 
         confidence = float(forecast.get("confidence", 0.0))
         magnitude = float(forecast.get("magnitude_pct", 0.0))
-        if confidence < self.min_confidence:
+        min_conf = float((adaptive_params or {}).get("kronos_min_confidence", self.min_confidence))
+        if confidence < min_conf:
             return None
 
         indicators = indicator_data or self._compute_indicators(df)
@@ -1033,6 +1056,7 @@ class MultiTimeframeKronosStrategy(BaseStrategy):
         df: pd.DataFrame,
         indicator_data: Optional[Dict] = None,
         agent_reports: Optional[Dict[str, str]] = None,
+        adaptive_params: Optional[Dict[str, float]] = None,
     ) -> Optional[Signal]:
         if len(df) < 50:
             return None
@@ -1047,7 +1071,8 @@ class MultiTimeframeKronosStrategy(BaseStrategy):
         directions = [self._direction_from_pct(float(f.get("magnitude_pct", 0.0)), self.min_pct) for f in forecasts]
         confidences = [float(f.get("confidence", 0.0)) for f in forecasts]
 
-        if any(c < self.min_confidence for c in confidences):
+        min_conf = float((adaptive_params or {}).get("kronos_min_confidence", self.min_confidence))
+        if any(c < min_conf for c in confidences):
             return None
 
         if all(d == "UP" for d in directions):
@@ -1118,22 +1143,32 @@ def run_all_strategies(
     enabled_strategies: Optional[List[StrategyType]] = None,
     indicator_data: Optional[Dict] = None,
     agent_reports: Optional[Dict[str, str]] = None,
+    adaptive_params_by_strategy: Optional[Dict[str, Dict[str, float]]] = None,
 ) -> List[Signal]:
     """
     Run all enabled strategies and return their signals.
+
+    ``adaptive_params_by_strategy`` — optional mapping
+    ``{strategy_value: {param_name: value}}`` produced by the self-improver.
+    When absent, each strategy uses its built-in defaults.
     """
     if enabled_strategies is None:
         enabled_strategies = list(StrategyType)
-    
+
     signals = []
     for st in enabled_strategies:
         strategy = STRATEGIES.get(st)
         if strategy and strategy.enabled:
             try:
-                signal = strategy.generate_signal(df, indicator_data, agent_reports)
+                params = None
+                if adaptive_params_by_strategy is not None:
+                    params = adaptive_params_by_strategy.get(st.value)
+                signal = strategy.generate_signal(
+                    df, indicator_data, agent_reports, adaptive_params=params
+                )
                 if signal:
                     signals.append(signal)
             except Exception as e:
                 logger.error(f"Error in {st.value} strategy: {e}")
-    
+
     return signals

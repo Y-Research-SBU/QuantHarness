@@ -29,8 +29,15 @@ from run_continuous import (
 class FakeEngine:
     """Substitute paper-trading engine that returns canned portfolios."""
 
-    def __init__(self, portfolios: Optional[Dict[str, Dict]] = None):
+    def __init__(
+        self,
+        portfolios: Optional[Dict[str, Dict]] = None,
+        master: Optional[Dict] = None,
+        total_exposure: float = 0.0,
+    ):
         self._portfolios = portfolios or {}
+        self._master = master
+        self._total_exposure = float(total_exposure)
         self.snapshot_calls: List[str] = []
 
     def get_portfolio(self, symbol: str) -> Optional[Dict]:
@@ -38,6 +45,12 @@ class FakeEngine:
 
     def take_snapshot(self, symbol: str) -> None:
         self.snapshot_calls.append(symbol)
+
+    def get_master_portfolio(self) -> Optional[Dict]:
+        return self._master
+
+    def get_total_exposure(self) -> float:
+        return self._total_exposure
 
 
 class FakeScanner:
@@ -239,12 +252,20 @@ def test_runner_request_stop_short_circuits_loop():
 
 def test_performance_summary_shape():
     scanner = FakeScanner()
-    scanner.engine = FakeEngine(portfolios={
-        "BTC-USD": {
-            "current_balance": 10500.0, "total_pnl": 500.0,
-            "total_trades": 4, "win_rate": 0.5,
-        }
-    })
+    scanner.engine = FakeEngine(
+        portfolios={
+            "BTC-USD": {
+                "current_balance": 0.0, "total_pnl": 500.0,
+                "total_trades": 4, "win_rate": 0.5,
+            }
+        },
+        master={
+            "current_balance": 10200.0, "initial_balance": 10000.0,
+            "total_pnl": 500.0, "total_trades": 4,
+            "winning_trades": 2, "losing_trades": 2, "consecutive_losses": 0,
+        },
+        total_exposure=300.0,
+    )
     runner = ContinuousRunner(
         scanner=scanner,
         symbols=["BTC-USD"],
@@ -252,10 +273,13 @@ def test_performance_summary_shape():
         sleeper=lambda _x: None,
     )
     summary = runner.performance_summary()
+    # Equity = master cash + total exposure = 10200 + 300 = 10500
     assert summary["totals"]["balance"] == pytest.approx(10500.0)
     assert summary["totals"]["pnl"] == pytest.approx(500.0)
     assert summary["totals"]["n_markets"] == 1
     assert summary["portfolios"][0]["symbol"] == "BTC-USD"
+    assert summary["master"]["equity"] == pytest.approx(10500.0)
+    assert summary["master"]["total_pnl"] == pytest.approx(500.0)
     assert "schedules" in summary
     assert "BTC-USD" in summary["schedules"]
 
@@ -341,3 +365,64 @@ def test_main_no_kronos_flag_disables_kronos(monkeypatch):
     rc = main(["--symbols", "BTC-USD", "--once", "--no-kronos"])
     assert rc == 0
     assert captured.get("use_kronos") is False
+
+
+# ---------------------------------------------------------------------------
+# Self-improvement feedback through the runner
+# ---------------------------------------------------------------------------
+
+
+class FakeScannerWithImprovement(FakeScanner):
+    """FakeScanner that reports regimes + improvement level info per cycle."""
+
+    def __init__(self, regime: str = "trending_up", levels: Optional[List[str]] = None):
+        super().__init__(signals=3, trades=1)
+        self._regime = regime
+        self._levels = levels or ["L4", "L1"]
+
+    def run_scan_cycle(self, symbols: Optional[List[str]] = None) -> Dict:
+        syms = list(symbols or [])
+        self.cycles.append(syms)
+        return {
+            "signals_found": self._signals,
+            "trades_opened": self._trades,
+            "stops_triggered": 0,
+            "regimes": {s: self._regime for s in syms},
+            "improvement": {"levels_run": list(self._levels), "total_trades": 0},
+        }
+
+
+def test_runner_captures_regime_and_improvement_levels():
+    scanner = FakeScannerWithImprovement(regime="volatile", levels=["L4", "L2"])
+    runner = ContinuousRunner(
+        scanner=scanner,
+        symbols=["BTC-USD"],
+        clock=FakeClock(),
+        sleeper=lambda _x: None,
+    )
+    runner.run_once()
+
+    schedule = runner._schedules["BTC-USD"]
+    assert schedule.last_regime == "volatile"
+    assert schedule.last_improvement_levels == ["L4", "L2"]
+
+
+def test_performance_summary_includes_improvement_snapshot():
+    """The runner's performance summary must include the improvement snapshot
+    when the scanner exposes a self_improver."""
+    scanner = FakeScannerWithImprovement()
+    # Attach a tiny stub improver the runner will pull snapshots from.
+    scanner.self_improver = type("Stub", (), {
+        "get_strategy_weights": lambda self: {"momentum": 2.0},
+        "get_disabled_strategies": lambda self: [],
+        "evaluate_kronos_accuracy": lambda self: {"hit_rate": 0.6, "n": 42},
+    })()
+    runner = ContinuousRunner(
+        scanner=scanner,
+        symbols=["BTC-USD"],
+        clock=FakeClock(),
+        sleeper=lambda _x: None,
+    )
+    summary = runner.performance_summary()
+    assert summary["improvement"]["strategy_weights"] == {"momentum": 2.0}
+    assert summary["improvement"]["kronos_accuracy"]["hit_rate"] == 0.6

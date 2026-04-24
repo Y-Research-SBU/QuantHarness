@@ -63,6 +63,8 @@ class _MarketSchedule:
     total_trades: int = 0
     total_cycles: int = 0
     last_error: Optional[str] = None
+    last_regime: Optional[str] = None
+    last_improvement_levels: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -170,13 +172,24 @@ class ContinuousRunner:
             sched.total_trades += sched.last_trades
             sched.total_cycles += 1
             sched.last_error = None
+            # Self-improvement summary: surface regime + which levels ran.
+            regimes = results.get("regimes") or {}
+            if isinstance(regimes, dict):
+                sched.last_regime = regimes.get(symbol)
+            imp = results.get("improvement") or {}
+            if isinstance(imp, dict):
+                levels = imp.get("levels_run") or []
+                if isinstance(levels, list):
+                    sched.last_improvement_levels = [str(x) for x in levels]
             elapsed = self.clock() - start
             logger.info(
-                "[scan] %s — signals=%d trades=%d stops=%d (%.2fs)",
+                "[scan] %s — signals=%d trades=%d stops=%d regime=%s levels=%s (%.2fs)",
                 symbol,
                 sched.last_signals,
                 sched.last_trades,
                 int(results.get("stops_triggered", 0)),
+                sched.last_regime or "-",
+                ",".join(sched.last_improvement_levels) or "-",
                 elapsed,
             )
         except Exception as exc:
@@ -202,13 +215,35 @@ class ContinuousRunner:
     # ------------------------------------------------------------------
 
     def performance_summary(self) -> Dict:
-        """Return aggregate paper-trading performance across all markets."""
+        """Return aggregate paper-trading performance across all markets.
+
+        Totals come from the unified MASTER portfolio; the ``portfolios`` list
+        reports per-symbol realised P&L for analytics.
+        """
         engine = self.scanner.engine
         symbols = list(self._schedules.keys()) or list(MARKETS.keys())
 
+        # Master portfolio (unified totals)
+        try:
+            master = engine.get_master_portfolio() if hasattr(engine, "get_master_portfolio") else None
+        except Exception as exc:
+            logger.warning("Could not pull master portfolio: %s", exc)
+            master = None
+
+        # Equity = master cash + all open position values
+        try:
+            total_exposure = engine.get_total_exposure() if hasattr(engine, "get_total_exposure") else 0.0
+        except Exception:
+            total_exposure = 0.0
+
+        if master is not None:
+            total_balance = float(master.get("current_balance") or 0.0) + float(total_exposure or 0.0)
+            total_pnl = float(master.get("total_pnl") or 0.0)
+        else:
+            total_balance = 0.0
+            total_pnl = 0.0
+
         portfolios: List[Dict] = []
-        total_balance = 0.0
-        total_pnl = 0.0
         for symbol in symbols:
             try:
                 p = engine.get_portfolio(symbol)
@@ -221,8 +256,6 @@ class ContinuousRunner:
                     "trades": p.get("total_trades"),
                     "win_rate": p.get("win_rate"),
                 })
-                total_balance += float(p.get("current_balance") or 0.0)
-                total_pnl += float(p.get("total_pnl") or 0.0)
             except Exception as exc:
                 logger.warning("Could not pull portfolio for %s: %s", symbol, exc)
 
@@ -248,12 +281,38 @@ class ContinuousRunner:
                 "total_signals": s.total_signals,
                 "total_trades": s.total_trades,
                 "last_error": s.last_error,
+                "last_regime": s.last_regime,
+                "last_improvement_levels": list(s.last_improvement_levels),
             }
             for symbol, s in self._schedules.items()
         }
 
+        # Pull latest self-improvement snapshot (best-effort, never fatal).
+        improvement_snapshot: Optional[Dict[str, object]] = None
+        improver = getattr(self.scanner, "self_improver", None)
+        if improver is not None:
+            try:
+                improvement_snapshot = {
+                    "strategy_weights": improver.get_strategy_weights(),
+                    "disabled_strategies": improver.get_disabled_strategies(),
+                    "kronos_accuracy": improver.evaluate_kronos_accuracy(),
+                }
+            except Exception as exc:
+                logger.debug("improvement snapshot failed: %s", exc)
+                improvement_snapshot = {"error": str(exc)}
+
         return {
             "generated_at": datetime.utcnow().isoformat(),
+            "master": {
+                "balance": float(master.get("current_balance") or 0.0) if master else 0.0,
+                "equity": total_balance,
+                "total_pnl": total_pnl,
+                "total_trades": int(master.get("total_trades") or 0) if master else 0,
+                "winning_trades": int(master.get("winning_trades") or 0) if master else 0,
+                "losing_trades": int(master.get("losing_trades") or 0) if master else 0,
+                "consecutive_losses": int(master.get("consecutive_losses") or 0) if master else 0,
+                "open_exposure": float(total_exposure or 0.0),
+            } if master else None,
             "portfolios": portfolios,
             "totals": {
                 "balance": total_balance,
@@ -262,6 +321,7 @@ class ContinuousRunner:
             },
             "strategies": strategy_stats,
             "schedules": scheduler_summary,
+            "improvement": improvement_snapshot,
         }
 
 

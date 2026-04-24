@@ -392,8 +392,11 @@
         const slLabel = p.stop_loss_pct != null ? `${fmtPrice(p.stop_loss)} (${p.stop_loss_pct > 0 ? '+' : ''}${p.stop_loss_pct}%)` : '—';
         const tpLabel = p.take_profit_pct != null ? `${fmtPrice(p.take_profit)} (${p.take_profit_pct > 0 ? '+' : ''}${p.take_profit_pct}%)` : '—';
 
-        return `<tr class="border-b border-gray-800/50 hover:bg-white/5">
-          <td class="py-2 px-2 font-medium">${p.display_name || p.symbol}</td>
+        return `<tr class="border-b border-gray-800/50 hover:bg-white/5 cursor-pointer" onclick="openChart('${p.symbol}', '${p.tv_symbol || p.symbol}', '${p.display_name || p.symbol}', '${p.direction}', '${p.entry_price}', '${p.stop_loss || 0}', '${p.take_profit || 0}')">
+          <td class="py-2 px-2 font-medium">
+            <span class="underline decoration-dotted">${p.display_name || p.symbol}</span>
+            <span class="text-xs muted ml-1">📈</span>
+          </td>
           <td class="py-2 px-2 ${dirCls} font-bold">${p.direction}</td>
           <td class="py-2 px-2 text-xs muted">${p.strategy}</td>
           <td class="py-2 px-2 text-right">${fmtPrice(p.entry_price)}</td>

@@ -57,6 +57,22 @@ _FALLBACK_MARKETS = {
     "GBPUSD=X": {"display_name": "GBP/USD", "category": "forex"},
 }
 
+# TradingView symbol mapping for chart embeds
+TRADINGVIEW_SYMBOLS = {
+    "BTC-USD": "BINANCE:BTCUSDT",
+    "ETH-USD": "BINANCE:ETHUSDT",
+    "SOL-USD": "BINANCE:SOLUSDT",
+    "SPY": "AMEX:SPY",
+    "QQQ": "NASDAQ:QQQ",
+    "AAPL": "NASDAQ:AAPL",
+    "TSLA": "NASDAQ:TSLA",
+    "NVDA": "NASDAQ:NVDA",
+    "GC=F": "COMEX:GC1!",
+    "CL=F": "NYMEX:CL1!",
+    "EURUSD=X": "FX:EURUSD",
+    "GBPUSD=X": "FX:GBPUSD",
+}
+
 
 def _load_markets_meta() -> Dict[str, Dict[str, Any]]:
     """Load per-symbol metadata. Prefers market_config.MARKETS when available."""
@@ -545,6 +561,7 @@ def build_positions_detail(db_path: str) -> List[Dict[str, Any]]:
             "symbol": symbol,
             "display_name": meta.get("display_name", symbol),
             "category": meta.get("category", "unknown"),
+            "tv_symbol": TRADINGVIEW_SYMBOLS.get(symbol, symbol),
             "direction": direction,
             "strategy": t.get("strategy", ""),
             "entry_price": entry,
@@ -700,6 +717,11 @@ def create_app(
     def api_positions():
         """Open positions with entry, exit conditions, current price, and unrealized P&L."""
         return jsonify(build_positions_detail(app.config["DB_PATH"]))
+
+    @app.route("/api/tv_symbols")
+    def api_tv_symbols():
+        """TradingView symbol mapping for chart embeds."""
+        return jsonify(TRADINGVIEW_SYMBOLS)
 
     @app.route("/api/scanner")
     def api_scanner():

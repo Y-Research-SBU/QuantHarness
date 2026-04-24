@@ -87,7 +87,7 @@ MARKETS: Dict[str, MarketConfig] = {
     "AVAX-USD": _crypto("AVAX-USD", "Avalanche", "crypto_l1"),
     "LINK-USD": _crypto("LINK-USD", "Chainlink", "crypto_defi"),
     "DOT-USD": _crypto("DOT-USD", "Polkadot", "crypto_l1"),
-    "MATIC-USD": _crypto("MATIC-USD", "Polygon", "crypto_l2"),
+    # "MATIC-USD": removed — yfinance reports delisted (2026-04-24)
     "ATOM-USD": _crypto("ATOM-USD", "Cosmos", "crypto_l1"),
     # "UNI-USD": removed — yfinance reports delisted (2026-04-24)
     # "ARB-USD": removed — yfinance reports delisted (2026-04-24)

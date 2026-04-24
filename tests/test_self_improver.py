@@ -456,3 +456,32 @@ def test_regime_affinity_learned_override(tmp_db_path):
     assert "momentum" in affinity
     for regime in ("trending_up", "trending_down", "ranging", "volatile"):
         assert regime in affinity["momentum"]
+
+
+def test_emergency_disable_low_win_rate(tmp_db_path):
+    """Strategies with win rate below EMERGENCY_DISABLE_WIN_RATE are disabled
+    even if sharpe is non-negative (e.g. a strategy that rarely trades but
+    has a non-negative sharpe due to lucky outliers while losing 90%+ of trades)."""
+    from self_improver import SelfImprover, WEIGHT_DISABLED, EMERGENCY_DISABLE_WIN_RATE
+    imp = SelfImprover(db_path=tmp_db_path, min_trades_for_disable=5)
+    conn = __import__("sqlite3").connect(tmp_db_path)
+    # Insert 10 trades: 0 wins (all losses) but with pnl near 0 so sharpe ~ 0
+    for i in range(10):
+        conn.execute(
+            "INSERT INTO trades (symbol, timeframe, strategy, direction, entry_price, position_size, quantity, stop_loss, take_profit, status, pnl, entry_time, exit_time) "
+            "VALUES (?, '15m', 'bad_strat', 'LONG', 100, 10, 0.1, 95, 110, 'STOPPED', -0.01, datetime('now', ?), datetime('now', ?))",
+            (f"SYM{i}-USD", f"-{10-i} hours", f"-{10-i} hours"),
+        )
+    conn.commit()
+    conn.close()
+
+    weights = imp.get_strategy_weights()
+    assert weights.get("bad_strat") == WEIGHT_DISABLED, (
+        f"Expected bad_strat (0% win rate) to be disabled, got weight={weights.get('bad_strat')}"
+    )
+
+
+def test_min_trades_for_disable_lowered():
+    """MIN_TRADES_FOR_DISABLE should be 10 (not 50) to catch bad strategies faster."""
+    from self_improver import MIN_TRADES_FOR_DISABLE
+    assert MIN_TRADES_FOR_DISABLE == 10

@@ -42,7 +42,11 @@ logger = logging.getLogger(__name__)
 ROLLING_WINDOW = 200
 
 # Disable a strategy if sharpe < 0 after this many trades.
-MIN_TRADES_FOR_DISABLE = 50
+MIN_TRADES_FOR_DISABLE = 10
+
+# Emergency disable: if win rate is below this after MIN_TRADES_FOR_DISABLE trades,
+# disable regardless of sharpe (catches strategies that win big rarely but bleed)
+EMERGENCY_DISABLE_WIN_RATE = 0.10
 
 # Strategy sharpe → weight mapping.
 WEIGHT_HIGH_SHARPE = 2.0
@@ -214,7 +218,14 @@ class SelfImprover:
         weights: Dict[str, float] = {}
         for strat, sharpe in sharpes.items():
             n = counts.get(strat, 0)
+            # Compute rolling win rate for emergency check
+            trades = self._fetch_closed_trades(strategy=strat, limit=self.rolling_window)
+            wins = sum(1 for t in trades if float(t.get("pnl") or 0.0) > 0)
+            win_rate = wins / len(trades) if trades else 0.0
+
             if sharpe < 0 and n >= self.min_trades_for_disable:
+                weights[strat] = WEIGHT_DISABLED
+            elif n >= self.min_trades_for_disable and win_rate < EMERGENCY_DISABLE_WIN_RATE:
                 weights[strat] = WEIGHT_DISABLED
             elif sharpe > 1.5:
                 weights[strat] = WEIGHT_HIGH_SHARPE

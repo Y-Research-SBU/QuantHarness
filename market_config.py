@@ -119,8 +119,8 @@ MARKETS: Dict[str, MarketConfig] = {
     "RUNE-USD": _crypto("RUNE-USD", "THORChain", "crypto_defi"),
 
     # --- Tier 2c: Infrastructure ---
-    "STX-USD": _crypto("STX-USD", "Stacks", "crypto_l2"),
-    "FTM-USD": _crypto("FTM-USD", "Fantom/Sonic", "crypto_l1"),
+    # STX-USD removed — delisted per yfinance (2026-04-24)
+    # FTM-USD removed — delisted per yfinance (2026-04-24)
     # STRK-USD removed — delisted per yfinance (2026-04-24)
     "EIGEN-USD": _crypto("EIGEN-USD", "EigenLayer", "crypto_l2"),
 

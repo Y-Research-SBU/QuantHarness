@@ -275,7 +275,7 @@
   </div>
 
   <script>
-    // Chart modal functions
+    // Chart modal functions — uses iframe embed (reliable across all browsers)
     function openChart(symbol, tvSymbol, displayName, direction, entry, sl, tp) {
       const modal = document.getElementById('chart-modal');
       const container = document.getElementById('chart-container');
@@ -283,39 +283,13 @@
       const info = document.getElementById('chart-position-info');
       
       title.textContent = displayName + ' (' + symbol + ')';
-      info.innerHTML = `<span class="${direction === 'LONG' ? 'text-green-400' : 'text-red-400'}">${direction}</span> · Entry: $${Number(entry).toLocaleString()} · SL: $${Number(sl).toLocaleString()} · TP: $${Number(tp).toLocaleString()}`;
+      const dirColor = direction === 'LONG' ? 'text-green-400' : 'text-red-400';
+      const fmtPrice = (v) => Number(v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 6});
+      info.innerHTML = `<span class="${dirColor} font-bold">${direction}</span> &middot; Entry: $${fmtPrice(entry)} &middot; SL: $${fmtPrice(sl)} &middot; TP: $${fmtPrice(tp)}`;
       
-      // TradingView Advanced Chart widget
-      container.innerHTML = '';
-      const widgetDiv = document.createElement('div');
-      widgetDiv.className = 'tradingview-widget-container';
-      widgetDiv.style.height = '100%';
-      widgetDiv.style.width = '100%';
-      widgetDiv.innerHTML = `<div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div>`;
-      container.appendChild(widgetDiv);
-      
-      const script = document.createElement('script');
-      script.type = 'text/javascript';
-      script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
-      script.async = true;
-      script.innerHTML = JSON.stringify({
-        "autosize": true,
-        "symbol": tvSymbol,
-        "interval": "60",
-        "timezone": "America/New_York",
-        "theme": "dark",
-        "style": "1",
-        "locale": "en",
-        "backgroundColor": "rgba(17, 24, 38, 1)",
-        "gridColor": "rgba(55, 65, 81, 0.3)",
-        "hide_top_toolbar": false,
-        "hide_legend": false,
-        "allow_symbol_change": true,
-        "save_image": false,
-        "calendar": false,
-        "support_host": "https://www.tradingview.com"
-      });
-      widgetDiv.appendChild(script);
+      // TradingView iframe embed — works everywhere, no script injection issues
+      const tvUrl = `https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(tvSymbol)}&interval=60&timezone=America%2FNew_York&theme=dark&style=1&locale=en&hide_top_toolbar=0&hide_legend=0&save_image=0&allow_symbol_change=1&backgroundColor=rgba(17,24,38,1)`;
+      container.innerHTML = `<iframe src="${tvUrl}" style="width:100%;height:100%;border:none;" allowtransparency="true" frameborder="0"></iframe>`;
       
       modal.classList.remove('hidden');
     }

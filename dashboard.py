@@ -488,6 +488,7 @@ def build_market_grid(db_path: str) -> List[Dict[str, Any]]:
                 "max_drawdown_pct": max_dd * 100.0,
                 "circuit_breaker": circuit_breaker,
                 "sparkline": sparkline,
+                "tv_symbol": TRADINGVIEW_SYMBOLS.get(symbol, symbol),
                 "latest_signal": latest_signal,
             }
         )

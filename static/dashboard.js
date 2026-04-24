@@ -152,10 +152,12 @@
       ? `<span class="text-xs px-2 py-0.5 rounded bg-yellow-900/60 text-yellow-300">🔴 BREAKER</span>`
       : '';
 
-    const canvasId = `spark-${m.symbol.replace(/[^A-Za-z0-9]/g, '_')}`;
+    const tvSymbol = m.tv_symbol || m.symbol;
+    const miniChartUrl = `https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(tvSymbol)}&interval=60&timezone=America%2FNew_York&theme=dark&style=3&locale=en&hide_top_toolbar=1&hide_legend=1&save_image=0&hide_volume=1&backgroundColor=rgba(0,0,0,0)`;
 
     return `
-      <div class="rounded-lg p-3 border ${borderClass} ${bgClass}">
+      <div class="rounded-lg p-3 border ${borderClass} ${bgClass} cursor-pointer hover:border-gray-500 transition-colors"
+           onclick="openChart('${m.symbol}', '${tvSymbol}', '${m.display_name}', '${signal ? signal.direction : ''}', '${signal ? signal.entry_price : 0}', '0', '0')">
         <div class="flex items-start justify-between">
           <div>
             <div class="flex items-center gap-2">
@@ -169,8 +171,8 @@
             <div class="text-xs muted monospace">${fmtUSD(m.current_balance)}</div>
           </div>
         </div>
-        <div class="mt-2">
-          <canvas id="${canvasId}" class="sparkline" data-spark='${JSON.stringify(m.sparkline)}' data-profit="${profit}"></canvas>
+        <div class="mt-2 rounded overflow-hidden" style="height:120px;">
+          <iframe src="${miniChartUrl}" style="width:100%;height:100%;border:none;pointer-events:none;" allowtransparency="true" frameborder="0"></iframe>
         </div>
         <div class="flex justify-between text-xs mt-2">
           <div class="muted">${m.total_trades} trades · DD ${fmtPct(m.max_drawdown_pct, 1)}</div>
@@ -187,13 +189,6 @@
       $('grid-count').textContent = rows.length;
       const host = $('market-grid');
       host.innerHTML = rows.map(makeMarketCard).join('');
-      // render sparklines
-      rows.forEach((m) => {
-        const canvasId = `spark-${m.symbol.replace(/[^A-Za-z0-9]/g, '_')}`;
-        const canvas = document.getElementById(canvasId);
-        if (!canvas) return;
-        renderSparkline(canvas, m.sparkline || [], (m.total_pnl || 0) >= 0);
-      });
     } catch (e) {
       console.error('markets load failed', e);
     }

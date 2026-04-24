@@ -492,6 +492,82 @@ def build_strategy_table(db_path: str) -> List[Dict[str, Any]]:
     return rows
 
 
+def build_positions_detail(db_path: str) -> List[Dict[str, Any]]:
+    """Open positions with entry/exit conditions, current price, and unrealized P&L."""
+    open_trades = _query_trades(db_path, limit=1000, status="OPEN")
+    if not open_trades:
+        return []
+
+    symbols = list({t["symbol"] for t in open_trades})
+    current_prices = _get_cached_prices(symbols)
+    markets_meta = _load_markets_meta()
+
+    positions = []
+    for t in open_trades:
+        symbol = t["symbol"]
+        entry = float(t.get("entry_price", 0))
+        sl = float(t.get("stop_loss", 0)) if t.get("stop_loss") else None
+        tp = float(t.get("take_profit", 0)) if t.get("take_profit") else None
+        qty = float(t.get("quantity", 0))
+        direction = t.get("direction", "")
+        size = float(t.get("position_size", 0))
+        current = current_prices.get(symbol, entry)
+        meta = markets_meta.get(symbol, {})
+
+        # Unrealized P&L
+        if direction == "LONG":
+            unrealized = (current - entry) * qty
+            sl_pct = ((sl - entry) / entry * 100) if sl and entry else None
+            tp_pct = ((tp - entry) / entry * 100) if tp and entry else None
+        else:
+            unrealized = (entry - current) * qty
+            sl_pct = ((entry - sl) / entry * -100) if sl and entry else None
+            tp_pct = ((entry - tp) / entry * -100) if tp and entry else None
+
+        unrealized_pct = (unrealized / size * 100) if size > 0 else 0
+
+        # Risk/reward ratio
+        if sl_pct and tp_pct and sl_pct != 0:
+            rr = abs(tp_pct / sl_pct)
+        else:
+            rr = None
+
+        # Distance to stop and target
+        if direction == "LONG":
+            dist_to_sl_pct = ((current - sl) / current * 100) if sl else None
+            dist_to_tp_pct = ((tp - current) / current * 100) if tp else None
+        else:
+            dist_to_sl_pct = ((sl - current) / current * -100) if sl else None
+            dist_to_tp_pct = ((current - tp) / current * 100) if tp else None
+
+        positions.append({
+            "id": t.get("id"),
+            "symbol": symbol,
+            "display_name": meta.get("display_name", symbol),
+            "category": meta.get("category", "unknown"),
+            "direction": direction,
+            "strategy": t.get("strategy", ""),
+            "entry_price": entry,
+            "current_price": current,
+            "stop_loss": sl,
+            "take_profit": tp,
+            "stop_loss_pct": round(sl_pct, 2) if sl_pct is not None else None,
+            "take_profit_pct": round(tp_pct, 2) if tp_pct is not None else None,
+            "risk_reward": round(rr, 1) if rr is not None else None,
+            "position_size": size,
+            "quantity": qty,
+            "unrealized_pnl": round(unrealized, 2),
+            "unrealized_pct": round(unrealized_pct, 2),
+            "dist_to_sl_pct": round(dist_to_sl_pct, 2) if dist_to_sl_pct is not None else None,
+            "dist_to_tp_pct": round(dist_to_tp_pct, 2) if dist_to_tp_pct is not None else None,
+            "entry_time": t.get("entry_time"),
+            "rationale": (t.get("agent_reasoning") or "")[:200],
+        })
+
+    positions.sort(key=lambda p: p["unrealized_pnl"], reverse=True)
+    return positions
+
+
 def build_trade_log(db_path: str, limit: int = 50) -> List[Dict[str, Any]]:
     trades = _query_trades(db_path, limit=limit)
     slim = []
@@ -619,6 +695,11 @@ def create_app(
         except ValueError:
             limit = 50
         return jsonify(build_trade_log(app.config["DB_PATH"], limit=limit))
+
+    @app.route("/api/positions")
+    def api_positions():
+        """Open positions with entry, exit conditions, current price, and unrealized P&L."""
+        return jsonify(build_positions_detail(app.config["DB_PATH"]))
 
     @app.route("/api/scanner")
     def api_scanner():

@@ -133,6 +133,37 @@
       </div>
     </section>
 
+    <!-- OPEN POSITIONS DETAIL -->
+    <section class="card rounded-lg">
+      <div class="card-header px-5 py-3 flex items-center justify-between">
+        <h2 class="text-sm font-semibold tracking-wider uppercase muted">Open Positions</h2>
+        <div class="text-xs muted" id="positions-count"></div>
+      </div>
+      <div class="p-4 overflow-x-auto grid-scroll">
+        <table class="w-full text-sm">
+          <thead class="text-xs uppercase muted border-b border-gray-800 sticky top-0 bg-[#111826]">
+            <tr>
+              <th class="text-left py-2 px-2">Symbol</th>
+              <th class="text-left py-2 px-2">Dir</th>
+              <th class="text-left py-2 px-2">Strategy</th>
+              <th class="text-right py-2 px-2">Entry</th>
+              <th class="text-right py-2 px-2">Current</th>
+              <th class="text-right py-2 px-2">Stop Loss</th>
+              <th class="text-right py-2 px-2">Take Profit</th>
+              <th class="text-right py-2 px-2">R:R</th>
+              <th class="text-right py-2 px-2">Unreal P&amp;L</th>
+              <th class="text-right py-2 px-2">Size</th>
+              <th class="text-left py-2 px-2">Rationale</th>
+            </tr>
+          </thead>
+          <tbody id="positions-tbody"></tbody>
+        </table>
+        <div id="positions-empty" class="hidden text-center py-8 muted text-sm">
+          No open positions.
+        </div>
+      </div>
+    </section>
+
     <!-- TRADE LOG + SCANNER STATUS (side by side on lg) -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <section class="card rounded-lg lg:col-span-2">

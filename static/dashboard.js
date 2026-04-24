@@ -364,11 +364,59 @@
   }
 
   // ──────────────── orchestration ────────────────
+  async function loadPositions() {
+    try {
+      const rows = await fetchJSON('/api/positions');
+      const tbody = $('positions-tbody');
+      const empty = $('positions-empty');
+      const count = $('positions-count');
+      if (!tbody) return;
+
+      if (!rows || rows.length === 0) {
+        tbody.innerHTML = '';
+        if (empty) empty.classList.remove('hidden');
+        if (count) count.textContent = '0 positions';
+        return;
+      }
+      if (empty) empty.classList.add('hidden');
+      if (count) count.textContent = `${rows.length} positions`;
+
+      tbody.innerHTML = rows.map(p => {
+        const dirCls = p.direction === 'LONG' ? 'text-green-400' : 'text-red-400';
+        const pnlCls = p.unrealized_pnl >= 0 ? 'text-green-400' : 'text-red-400';
+        const rrCls = (p.risk_reward && p.risk_reward >= 1.5) ? 'text-green-400' : 
+                      (p.risk_reward && p.risk_reward < 1.0) ? 'text-red-400' : 'text-yellow-400';
+
+        const fmtPrice = (v) => v != null ? Number(v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 6}) : '—';
+
+        const slLabel = p.stop_loss_pct != null ? `${fmtPrice(p.stop_loss)} (${p.stop_loss_pct > 0 ? '+' : ''}${p.stop_loss_pct}%)` : '—';
+        const tpLabel = p.take_profit_pct != null ? `${fmtPrice(p.take_profit)} (${p.take_profit_pct > 0 ? '+' : ''}${p.take_profit_pct}%)` : '—';
+
+        return `<tr class="border-b border-gray-800/50 hover:bg-white/5">
+          <td class="py-2 px-2 font-medium">${p.display_name || p.symbol}</td>
+          <td class="py-2 px-2 ${dirCls} font-bold">${p.direction}</td>
+          <td class="py-2 px-2 text-xs muted">${p.strategy}</td>
+          <td class="py-2 px-2 text-right">${fmtPrice(p.entry_price)}</td>
+          <td class="py-2 px-2 text-right font-medium">${fmtPrice(p.current_price)}</td>
+          <td class="py-2 px-2 text-right text-red-400 text-xs">${slLabel}</td>
+          <td class="py-2 px-2 text-right text-green-400 text-xs">${tpLabel}</td>
+          <td class="py-2 px-2 text-right ${rrCls} font-bold">${p.risk_reward != null ? '1:' + p.risk_reward : '—'}</td>
+          <td class="py-2 px-2 text-right ${pnlCls} font-medium">${fmtUSD(p.unrealized_pnl)} (${p.unrealized_pct > 0 ? '+' : ''}${p.unrealized_pct}%)</td>
+          <td class="py-2 px-2 text-right text-xs">${fmtUSD(p.position_size)}</td>
+          <td class="py-2 px-2 text-xs muted max-w-[200px] truncate" title="${(p.rationale || '').replace(/"/g, '&quot;')}">${p.rationale || '—'}</td>
+        </tr>`;
+      }).join('');
+    } catch (e) {
+      console.warn('positions load failed', e);
+    }
+  }
+
   async function refreshAll() {
     await Promise.all([
       loadOverview(),
       loadMarkets(),
       loadStrategies(),
+      loadPositions(),
       loadTrades(),
       loadScanner(),
       loadBacktests(),

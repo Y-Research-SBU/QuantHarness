@@ -491,7 +491,11 @@ def _get_cached_prices(symbols: List[str]) -> Dict[str, float]:
 def _compute_unrealized_pnl(db_path: str) -> Dict[str, float]:
     """Compute unrealized P&L per symbol from open trades.
 
-    Fetches current market prices and compares to entry prices.
+    Primary source: the ``pnl`` column on OPEN trades, which is kept fresh by
+    ``PaperTradingEngine.mark_to_market()`` every scan cycle.  Falls back to
+    live price fetching only when the DB value is still at its default (0.0)
+    — e.g. right after the bot starts before the first MTM pass.
+
     Returns {symbol: unrealized_pnl}.
     """
     if not Path(db_path).exists():
@@ -505,18 +509,26 @@ def _compute_unrealized_pnl(db_path: str) -> Dict[str, float]:
     for t in open_trades:
         by_symbol.setdefault(t["symbol"], []).append(t)
 
-    # Fetch current prices for all symbols with open positions
+    # Check whether mark_to_market has run (any open trade with nonzero pnl)
+    has_mtm = any(float(t.get("pnl", 0)) != 0.0 for t in open_trades)
+
+    if has_mtm:
+        # Trust the DB: mark_to_market already computed these.
+        unrealized: Dict[str, float] = {}
+        for symbol, trades in by_symbol.items():
+            unrealized[symbol] = sum(float(t.get("pnl", 0)) for t in trades)
+        return unrealized
+
+    # Fallback: MTM hasn't run yet, compute from live prices.
     symbols = list(by_symbol.keys())
     current_prices = _get_cached_prices(symbols)
 
-    unrealized: Dict[str, float] = {}
+    unrealized = {}
     with _connect(db_path) as conn:
         for symbol, trades in by_symbol.items():
-            # Priority: live price > last exit price > entry price (fallback)
             if symbol in current_prices:
                 price = current_prices[symbol]
             else:
-                # Fallback: last closed trade exit price
                 row = conn.execute(
                     "SELECT exit_price FROM trades WHERE symbol = ? AND exit_price IS NOT NULL "
                     "ORDER BY exit_time DESC LIMIT 1",
@@ -773,6 +785,9 @@ def build_positions_detail(db_path: str) -> List[Dict[str, Any]]:
     current_prices = _get_cached_prices(symbols)
     markets_meta = _load_markets_meta()
 
+    # Check whether mark_to_market has populated pnl on open trades.
+    has_mtm = any(float(t.get("pnl", 0)) != 0.0 for t in open_trades)
+
     positions = []
     for t in open_trades:
         symbol = t["symbol"]
@@ -782,20 +797,40 @@ def build_positions_detail(db_path: str) -> List[Dict[str, Any]]:
         qty = float(t.get("quantity", 0))
         direction = t.get("direction", "")
         size = float(t.get("position_size", 0))
-        current = current_prices.get(symbol, entry)
         meta = markets_meta.get(symbol, {})
 
-        # Unrealized P&L
+        # Unrealized P&L: when mark_to_market has run, always trust the DB
+        # values — they were computed from the scanner's own price feed which
+        # fetches per-symbol and is more reliable than the dashboard's batch
+        # yfinance call (which can return stale daily closes).
+        db_pnl = float(t.get("pnl", 0))
+        if has_mtm and (db_pnl != 0.0 or float(t.get("pnl_pct", 0)) != 0.0):
+            unrealized = db_pnl
+            unrealized_pct_val = float(t.get("pnl_pct", 0)) * 100
+            # Derive current price from DB pnl for display.
+            if entry > 0 and qty > 0:
+                if direction == "LONG":
+                    current = entry + db_pnl / qty
+                else:
+                    current = entry - db_pnl / qty
+            else:
+                current = current_prices.get(symbol, entry)
+        else:
+            # MTM hasn't run or this specific trade is genuinely at $0 pnl.
+            current = current_prices.get(symbol, entry)
+            if direction == "LONG":
+                unrealized = (current - entry) * qty
+            else:
+                unrealized = (entry - current) * qty
+            unrealized_pct_val = (unrealized / size * 100) if size > 0 else 0
+
+        # Stop/target percentages relative to entry.
         if direction == "LONG":
-            unrealized = (current - entry) * qty
             sl_pct = ((sl - entry) / entry * 100) if sl and entry else None
             tp_pct = ((tp - entry) / entry * 100) if tp and entry else None
         else:
-            unrealized = (entry - current) * qty
             sl_pct = ((entry - sl) / entry * -100) if sl and entry else None
             tp_pct = ((entry - tp) / entry * -100) if tp and entry else None
-
-        unrealized_pct = (unrealized / size * 100) if size > 0 else 0
 
         # Risk/reward ratio
         if sl_pct and tp_pct and sl_pct != 0:
@@ -829,7 +864,7 @@ def build_positions_detail(db_path: str) -> List[Dict[str, Any]]:
             "position_size": size,
             "quantity": qty,
             "unrealized_pnl": round(unrealized, 2),
-            "unrealized_pct": round(unrealized_pct, 2),
+            "unrealized_pct": round(unrealized_pct_val, 2),
             "dist_to_sl_pct": round(dist_to_sl_pct, 2) if dist_to_sl_pct is not None else None,
             "dist_to_tp_pct": round(dist_to_tp_pct, 2) if dist_to_tp_pct is not None else None,
             "entry_time": t.get("entry_time"),

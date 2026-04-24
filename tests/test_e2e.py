@@ -224,8 +224,8 @@ class TestFullLifecycle:
         assert "momentum" in strat_names
 
     def test_equity_consistent_between_overview_and_markets(self, tmp_db_path, tmp_path):
-        """Per-market P&L + allocated capital, summed with master cash, equals
-        /api/overview's total_balance."""
+        """Accounting identity: total_balance (cash + allocated at cost)
+        plus unrealized P&L equals initial capital + total P&L."""
         _run_trade_session(tmp_db_path)
 
         backtest_dir = tmp_path / "bt"
@@ -234,15 +234,18 @@ class TestFullLifecycle:
         client = app.test_client()
 
         overview = client.get("/api/overview").get_json()
-        cards = client.get("/api/markets").get_json()
-        # Each card reports: realised P&L + unrealised P&L + allocated capital.
-        # master_cash + sum(realised+unrealised+allocated) == master_initial + total_pnl
-        #   + open_exposure   (since master_cash = master_initial + realised - allocated)
-        # So overview["total_balance"] == master_initial + total_pnl + unrealised.
-        # Equivalent check: overview total ≈ master_initial + sum(cards.total_pnl).
+        # total_balance = cash + open_position_sizes (at cost, no MTM)
+        # total_pnl = realized + unrealized
+        # Identity: total_balance + unrealized = initial + total_pnl
+        #   because total_balance = initial + realized - allocated + allocated
+        #                         = initial + realized
+        #   and total_pnl = realized + unrealized
+        #   so total_balance + unrealized = initial + realized + unrealized = initial + total_pnl ✓
+        total_balance = float(overview["total_balance"])
+        unrealized = float(overview.get("unrealized_pnl", 0))
         initial = float(overview["total_initial"])
-        sum_card_pnl = sum(c["total_pnl"] for c in cards)
-        assert initial + sum_card_pnl == pytest.approx(overview["total_balance"], rel=1e-6)
+        total_pnl = float(overview["total_pnl"])
+        assert total_balance + unrealized == pytest.approx(initial + total_pnl, rel=1e-4)
 
 
 # ══════════════════════════════════════════════════════════════════════

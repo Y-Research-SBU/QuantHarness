@@ -67,8 +67,8 @@ TRADINGVIEW_SYMBOLS = {
     "AAPL": "NASDAQ:AAPL",
     "TSLA": "NASDAQ:TSLA",
     "NVDA": "NASDAQ:NVDA",
-    "GC=F": "COMEX:GC1!",
-    "CL=F": "NYMEX:CL1!",
+    "GC=F": "TVC:GOLD",
+    "CL=F": "TVC:USOIL",
     "EURUSD=X": "FX:EURUSD",
     "GBPUSD=X": "FX:GBPUSD",
 }

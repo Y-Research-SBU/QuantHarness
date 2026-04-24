@@ -153,6 +153,7 @@
       : '';
 
     const tvSymbol = m.tv_symbol || m.symbol;
+    const safeId = m.symbol.replace(/[^A-Za-z0-9]/g, '_');
     const miniChartUrl = `https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(tvSymbol)}&interval=60&timezone=America%2FNew_York&theme=dark&style=3&locale=en&hide_top_toolbar=1&hide_legend=1&save_image=0&hide_volume=1&backgroundColor=rgba(0,0,0,0)`;
 
     return `
@@ -164,31 +165,63 @@
               <span class="font-semibold">${m.symbol}</span>
               ${breakerBadge}
             </div>
-            <div class="text-xs muted">${m.display_name} · ${m.category}</div>
+            <div class="text-xs muted">${m.display_name} \u00b7 ${m.category}</div>
           </div>
           <div class="text-right">
-            <div class="monospace font-semibold ${pnlClass(m.total_pnl)}">${signFmtPct(m.pnl_pct)}</div>
-            <div class="text-xs muted monospace">${fmtUSD(m.current_balance)}</div>
+            <div id="card-pct-${safeId}" class="monospace font-semibold ${pnlClass(m.total_pnl)}">${signFmtPct(m.pnl_pct)}</div>
+            <div id="card-bal-${safeId}" class="text-xs muted monospace">${fmtUSD(m.current_balance)}</div>
           </div>
         </div>
         <div class="mt-2 rounded overflow-hidden" style="height:120px;">
-          <iframe src="${miniChartUrl}" style="width:100%;height:100%;border:none;pointer-events:none;" allowtransparency="true" frameborder="0"></iframe>
+          <iframe src="${miniChartUrl}" style="width:100%;height:100%;border:none;pointer-events:none;" allowtransparency="true" frameborder="0" loading="lazy"></iframe>
         </div>
         <div class="flex justify-between text-xs mt-2">
-          <div class="muted">${m.total_trades} trades · DD ${fmtPct(m.max_drawdown_pct, 1)}</div>
-          <div class="${pnlClass(m.total_pnl)} monospace">${signFmtUSD(m.total_pnl)}</div>
+          <div id="card-info-${safeId}" class="muted">${m.total_trades} trades \u00b7 DD ${fmtPct(m.max_drawdown_pct, 1)}</div>
+          <div id="card-pnl-${safeId}" class="${pnlClass(m.total_pnl)} monospace">${signFmtUSD(m.total_pnl)}</div>
         </div>
         ${sigHtml}
       </div>
     `;
   }
 
+  // Track whether market grid has been initially rendered
+  let _marketsRendered = false;
+  let _lastMarketSymbols = '';
+
   async function loadMarkets() {
     try {
       const rows = await fetchJSON('/api/markets');
       $('grid-count').textContent = rows.length;
       const host = $('market-grid');
-      host.innerHTML = rows.map(makeMarketCard).join('');
+
+      // Build a fingerprint to detect structural changes (new/removed markets)
+      const symbolKey = rows.map(m => m.symbol).join(',');
+
+      if (!_marketsRendered || symbolKey !== _lastMarketSymbols) {
+        // First render or structure changed — full rebuild
+        host.innerHTML = rows.map(makeMarketCard).join('');
+        _marketsRendered = true;
+        _lastMarketSymbols = symbolKey;
+      } else {
+        // Incremental update — only update text nodes, leave iframes alone
+        rows.forEach((m) => {
+          const safeId = m.symbol.replace(/[^A-Za-z0-9]/g, '_');
+          const pnlEl = document.getElementById(`card-pnl-${safeId}`);
+          const balEl = document.getElementById(`card-bal-${safeId}`);
+          const pctEl = document.getElementById(`card-pct-${safeId}`);
+          const infoEl = document.getElementById(`card-info-${safeId}`);
+          if (pnlEl) {
+            pnlEl.textContent = signFmtUSD(m.total_pnl);
+            pnlEl.className = `${pnlClass(m.total_pnl)} monospace`;
+          }
+          if (balEl) balEl.textContent = fmtUSD(m.current_balance);
+          if (pctEl) {
+            pctEl.textContent = signFmtPct(m.pnl_pct);
+            pctEl.className = `monospace font-semibold ${pnlClass(m.total_pnl)}`;
+          }
+          if (infoEl) infoEl.textContent = `${m.total_trades} trades \u00b7 DD ${fmtPct(m.max_drawdown_pct, 1)}`;
+        });
+      }
     } catch (e) {
       console.error('markets load failed', e);
     }

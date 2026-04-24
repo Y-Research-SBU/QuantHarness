@@ -48,6 +48,10 @@ MIN_TRADES_FOR_DISABLE = 10
 # disable regardless of sharpe (catches strategies that win big rarely but bleed)
 EMERGENCY_DISABLE_WIN_RATE = 0.10
 
+# Zero-win emergency: disable if win rate is exactly 0% after this many trades
+# (lower threshold than MIN_TRADES_FOR_DISABLE to catch total-loss strategies faster)
+ZERO_WIN_MIN_TRADES = 5
+
 # Strategy sharpe → weight mapping.
 WEIGHT_HIGH_SHARPE = 2.0
 WEIGHT_NORMAL = 1.0
@@ -223,7 +227,9 @@ class SelfImprover:
             wins = sum(1 for t in trades if float(t.get("pnl") or 0.0) > 0)
             win_rate = wins / len(trades) if trades else 0.0
 
-            if sharpe < 0 and n >= self.min_trades_for_disable:
+            if n >= ZERO_WIN_MIN_TRADES and win_rate == 0.0:
+                weights[strat] = WEIGHT_DISABLED
+            elif sharpe < 0 and n >= self.min_trades_for_disable:
                 weights[strat] = WEIGHT_DISABLED
             elif n >= self.min_trades_for_disable and win_rate < EMERGENCY_DISABLE_WIN_RATE:
                 weights[strat] = WEIGHT_DISABLED

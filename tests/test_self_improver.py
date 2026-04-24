@@ -485,3 +485,51 @@ def test_min_trades_for_disable_lowered():
     """MIN_TRADES_FOR_DISABLE should be 10 (not 50) to catch bad strategies faster."""
     from self_improver import MIN_TRADES_FOR_DISABLE
     assert MIN_TRADES_FOR_DISABLE == 10
+
+
+def test_zero_win_emergency_cutoff_at_5_trades(tmp_db_path):
+    """Strategies with 0% win rate are disabled after just 5 trades (ZERO_WIN_MIN_TRADES)
+    even though the normal disable threshold is 10 trades."""
+    from self_improver import SelfImprover, WEIGHT_DISABLED, ZERO_WIN_MIN_TRADES
+    assert ZERO_WIN_MIN_TRADES == 5
+    imp = SelfImprover(db_path=tmp_db_path)
+    conn = __import__("sqlite3").connect(tmp_db_path)
+    # Insert exactly 5 trades: all losses
+    for i in range(5):
+        conn.execute(
+            "INSERT INTO trades (symbol, timeframe, strategy, direction, entry_price, "
+            "position_size, quantity, stop_loss, take_profit, status, pnl, entry_time, exit_time) "
+            "VALUES (?, '15m', 'zero_win_strat', 'LONG', 100, 10, 0.1, 95, 110, 'STOPPED', -1.0, "
+            "datetime('now', ?), datetime('now', ?))",
+            (f"SYM{i}-USD", f"-{10-i} hours", f"-{10-i} hours"),
+        )
+    conn.commit()
+    conn.close()
+
+    weights = imp.get_strategy_weights()
+    assert weights.get("zero_win_strat") == WEIGHT_DISABLED, (
+        f"Expected zero_win_strat to be disabled at 5 trades with 0% win rate, "
+        f"got weight={weights.get('zero_win_strat')}"
+    )
+
+
+def test_zero_win_not_disabled_at_4_trades(tmp_db_path):
+    """With only 4 trades (below ZERO_WIN_MIN_TRADES), 0% win rate should NOT disable."""
+    from self_improver import SelfImprover, WEIGHT_DISABLED
+    imp = SelfImprover(db_path=tmp_db_path)
+    conn = __import__("sqlite3").connect(tmp_db_path)
+    for i in range(4):
+        conn.execute(
+            "INSERT INTO trades (symbol, timeframe, strategy, direction, entry_price, "
+            "position_size, quantity, stop_loss, take_profit, status, pnl, entry_time, exit_time) "
+            "VALUES (?, '15m', 'young_strat', 'LONG', 100, 10, 0.1, 95, 110, 'STOPPED', -1.0, "
+            "datetime('now', ?), datetime('now', ?))",
+            (f"SYM{i}-USD", f"-{10-i} hours", f"-{10-i} hours"),
+        )
+    conn.commit()
+    conn.close()
+
+    weights = imp.get_strategy_weights()
+    assert weights.get("young_strat") != WEIGHT_DISABLED, (
+        f"Expected young_strat NOT to be disabled at 4 trades, got weight={weights.get('young_strat')}"
+    )

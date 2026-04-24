@@ -485,6 +485,15 @@ class MarketScanner:
         closed = self.check_all_stops(current_prices)
         results["stops_triggered"] = len(closed)
 
+        # Mark-to-market: refresh unrealised P&L on still-open positions so the
+        # dashboard and analytics see live numbers (not 0 until close).
+        try:
+            mtm = self.engine.mark_to_market(current_prices)
+            results["unrealized_pnl"] = mtm.get("total_unrealized_pnl", 0.0)
+            results["positions_marked"] = mtm.get("positions_marked", 0)
+        except Exception as exc:
+            logger.warning("mark_to_market failed (non-fatal): %s", exc)
+
         # Scan markets
         all_signals: List[Signal] = []
         for symbol in symbols:

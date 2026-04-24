@@ -10,7 +10,7 @@ do not hold any cash of their own.
 import json
 import logging
 import sqlite3
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from db_schema import get_connection, init_db
@@ -42,6 +42,17 @@ class PaperTradingEngine:
     MAX_POSITION_SIZE = 500.0       # Max $ per position
     MIN_POSITION_SIZE = 50.0        # Min $ per position
     MAX_EXPOSURE_PCT = 0.60         # Max 60% of master portfolio deployed at once
+
+    # Post-close cooldown: after a trade on a symbol is closed or stopped out,
+    # block re-entries on that symbol for this many minutes. Prevents the
+    # oscillation where a stopped-out SHORT gets reopened on the next scan
+    # because the strategy is still firing against the prior setup.
+    COOLDOWN_MINUTES = 30
+
+    # Reject trades whose entry_price / stop_loss / take_profit come in at or
+    # below this value. Catches data-feed bugs that return 0.0 for very low
+    # priced tokens (which would disable stop/tp entirely since price >= 0).
+    MIN_PRICE = 1e-8
 
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path
@@ -142,6 +153,39 @@ class PaperTradingEngine:
         positions = self.get_open_positions()
         return [{"symbol": p["symbol"], "direction": p["direction"]} for p in positions]
 
+    def _recent_or_open_trade(self, symbol: str) -> bool:
+        """True if ``symbol`` has an OPEN trade OR a trade closed within the
+        cooldown window. Logs the reason so callers don't need to.
+        """
+        cutoff = (datetime.utcnow() - timedelta(minutes=self.COOLDOWN_MINUTES)).isoformat()
+        with get_connection(self.db_path) as conn:
+            open_row = conn.execute(
+                "SELECT id FROM trades WHERE symbol = ? AND status = 'OPEN' LIMIT 1",
+                (symbol,)
+            ).fetchone()
+            if open_row:
+                logger.warning(
+                    f"Position stacking blocked: {symbol} already has an open trade."
+                )
+                return True
+            if self.COOLDOWN_MINUTES <= 0:
+                return False
+            recent = conn.execute(
+                """SELECT id, status, exit_time FROM trades
+                   WHERE symbol = ? AND status != 'OPEN'
+                     AND exit_time IS NOT NULL AND exit_time >= ?
+                   ORDER BY exit_time DESC LIMIT 1""",
+                (symbol, cutoff)
+            ).fetchone()
+        if recent:
+            logger.warning(
+                f"Cooldown active for {symbol}: last trade #{recent['id']} "
+                f"({recent['status']}) closed at {recent['exit_time']}; "
+                f"waiting {self.COOLDOWN_MINUTES}min before re-entry."
+            )
+            return True
+        return False
+
     # ────────────────────────── Trade execution ──────────────────────────
 
     def execute_trade(
@@ -168,13 +212,33 @@ class PaperTradingEngine:
             logger.error(f"Unknown market {signal.symbol}")
             return None
 
-        # ── Position stacking guard ──────────────────────────────────
-        symbol_open_positions = self.get_open_positions(signal.symbol)
-        if symbol_open_positions:
+        # ── Price sanity check ───────────────────────────────────────
+        # Reject trades with zero/near-zero prices — the data feed
+        # occasionally returns 0.0 for very low-priced tokens, which
+        # breaks stop-loss / take-profit (since price >= 0 always).
+        if signal.entry_price is None or float(signal.entry_price) <= self.MIN_PRICE:
             logger.warning(
-                f"Position stacking blocked: {signal.symbol} already has "
-                f"{len(symbol_open_positions)} open position(s). Skipping new {signal.direction} trade."
+                f"Rejected {signal.symbol}: entry_price={signal.entry_price} "
+                f"is zero or below minimum ({self.MIN_PRICE})"
             )
+            return None
+        if position_size.stop_loss is None or float(position_size.stop_loss) <= self.MIN_PRICE:
+            logger.warning(
+                f"Rejected {signal.symbol}: stop_loss={position_size.stop_loss} invalid"
+            )
+            return None
+        if position_size.take_profit is None or float(position_size.take_profit) <= self.MIN_PRICE:
+            logger.warning(
+                f"Rejected {signal.symbol}: take_profit={position_size.take_profit} invalid"
+            )
+            return None
+
+        # ── Stacking guard + cooldown ────────────────────────────────
+        # Block a new entry if the symbol has an OPEN position OR was recently
+        # closed/stopped (within COOLDOWN_MINUTES). The cooldown half also
+        # fixes the oscillation where a stopped-out symbol's strategy keeps
+        # firing and immediately re-enters.
+        if self._recent_or_open_trade(signal.symbol):
             return None
 
         master = self.get_master_portfolio()
@@ -443,6 +507,57 @@ class PaperTradingEngine:
             return trade
 
     # ────────────────────────── Stops & snapshots ──────────────────────────
+
+    def mark_to_market(self, current_prices: Dict[str, float]) -> Dict[str, Any]:
+        """Update unrealised P&L on every OPEN trade using current prices.
+
+        Writes ``pnl`` and ``pnl_pct`` on the trades table in-place; the
+        status stays ``OPEN``. Missing / non-positive prices are skipped so a
+        stale feed on one symbol doesn't zero out P&L on the rest.
+
+        Returns a summary dict with:
+          - ``total_unrealized_pnl``: sum of unrealised P&L across marked positions
+          - ``positions_marked``: how many OPEN trades were updated
+          - ``positions_skipped``: open trades we couldn't price (missing/invalid)
+        """
+        open_trades = self.get_open_positions()
+        total_unrealized_pnl = 0.0
+        marked = 0
+        skipped = 0
+        now = datetime.utcnow().isoformat()
+
+        with get_connection(self.db_path) as conn:
+            for trade in open_trades:
+                symbol = trade["symbol"]
+                price = current_prices.get(symbol)
+                if price is None or float(price) <= 0:
+                    skipped += 1
+                    continue
+                price = float(price)
+
+                qty = float(trade["quantity"] or 0.0)
+                if trade["direction"] == "LONG":
+                    pnl = (price - float(trade["entry_price"])) * qty
+                else:  # SHORT
+                    pnl = (float(trade["entry_price"]) - price) * qty
+
+                size = float(trade["position_size"] or 0.0)
+                pnl_pct = (pnl / size) if size > 0 else 0.0
+
+                conn.execute(
+                    """UPDATE trades
+                       SET pnl = ?, pnl_pct = ?, updated_at = ?
+                       WHERE id = ? AND status = 'OPEN'""",
+                    (pnl, pnl_pct, now, trade["id"]),
+                )
+                total_unrealized_pnl += pnl
+                marked += 1
+
+        return {
+            "total_unrealized_pnl": total_unrealized_pnl,
+            "positions_marked": marked,
+            "positions_skipped": skipped,
+        }
 
     def check_stops(self, current_prices: Dict[str, float]) -> List[Dict]:
         """Check all open positions for stop-loss/take-profit hits."""

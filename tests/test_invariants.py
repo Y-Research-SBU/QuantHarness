@@ -120,14 +120,16 @@ def test_daily_loss_threshold_boundary(daily_pnl, initial, expected_allowed):
 ])
 def test_correlation_threshold(existing, direction, expected_allowed):
     rm = RiskManager()
-    # Build `existing` positions in crypto group that match direction.
-    group_syms = get_correlation_groups()["crypto"]
-    other_syms = [s for s in group_syms if s != "SOL-USD"]
+    # Build `existing` positions in SOL-USD's correlation group.
+    target = "SOL-USD"
+    my_group = MARKETS[target].correlation_group
+    group_syms = get_correlation_groups().get(my_group, [])
+    other_syms = [s for s in group_syms if s != target]
     positions = [
         {"symbol": other_syms[i % len(other_syms)], "direction": direction}
         for i in range(existing)
     ]
-    r = rm.check_correlation("SOL-USD", direction, positions)
+    r = rm.check_correlation(target, direction, positions)
     assert r.allowed is expected_allowed
 
 
@@ -211,10 +213,13 @@ def test_breakeven_never_counted_as_loss(tmp_db_path, entry_prices):
             result = engine.close_trade(tid, exit_price=entry)
             assert result["pnl"] == 0.0
 
-    # No portfolio should have any loss counted.
+    # Neither per-symbol rows nor the master portfolio should have losses.
     for p in engine.get_all_portfolios():
         assert p["losing_trades"] == 0
         assert p["winning_trades"] == 0
+    master = engine.get_master_portfolio()
+    assert master["losing_trades"] == 0
+    assert master["winning_trades"] == 0
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -323,15 +328,14 @@ def test_stop_loss_direction(direction, expected_below):
 
 def test_peak_balance_only_increases(tmp_db_path):
     engine = PaperTradingEngine(db_path=tmp_db_path)
-    prev_peak = engine.get_portfolio("BTC-USD")["peak_balance"]
+    prev_peak = engine.get_master_portfolio()["peak_balance"]
 
-    # Sequence of randomish P&L.
     exit_prices = [110.0, 90.0, 120.0, 85.0, 130.0, 70.0]
     for exit in exit_prices:
         tid = engine.execute_trade(_sig(), _pos(size=200.0, qty=2.0))
         engine.close_trade(tid, exit_price=exit)
 
-        new_peak = engine.get_portfolio("BTC-USD")["peak_balance"]
+        new_peak = engine.get_master_portfolio()["peak_balance"]
         assert new_peak >= prev_peak - 1e-6
         prev_peak = new_peak
 
@@ -363,7 +367,8 @@ def test_is_circuit_breaker_active(dd_pct, expected_active):
 
 def test_equity_invariant_large_sequence(tmp_db_path):
     engine = PaperTradingEngine(db_path=tmp_db_path)
-    initial = engine.get_portfolio("BTC-USD")["initial_balance"]
+    engine.COOLDOWN_MINUTES = 0  # test rapid same-symbol cycling
+    initial = engine.get_master_portfolio()["initial_balance"]
 
     expected_pnl = 0.0
     for exit_price in [105.0, 95.0, 102.0, 98.0, 108.0, 93.0, 106.0]:
@@ -371,9 +376,9 @@ def test_equity_invariant_large_sequence(tmp_db_path):
         result = engine.close_trade(tid, exit_price=exit_price)
         expected_pnl += result["pnl"]
 
-    portfolio = engine.get_portfolio("BTC-USD")
-    assert portfolio["current_balance"] == pytest.approx(initial + expected_pnl)
-    assert portfolio["total_pnl"] == pytest.approx(expected_pnl)
+    master = engine.get_master_portfolio()
+    assert master["current_balance"] == pytest.approx(initial + expected_pnl)
+    assert master["total_pnl"] == pytest.approx(expected_pnl)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -383,17 +388,16 @@ def test_equity_invariant_large_sequence(tmp_db_path):
 
 def test_consecutive_losses_increments_and_resets(tmp_db_path):
     engine = PaperTradingEngine(db_path=tmp_db_path)
+    engine.COOLDOWN_MINUTES = 0  # test rapid stop-loss streak on one symbol
 
-    # 3 losses in a row
     for _ in range(3):
         tid = engine.execute_trade(_sig(), _pos(size=200.0, qty=2.0))
         engine.close_trade(tid, exit_price=90.0)
-    assert engine.get_portfolio("BTC-USD")["consecutive_losses"] == 3
+    assert engine.get_master_portfolio()["consecutive_losses"] == 3
 
-    # Win → reset to 0
     tid = engine.execute_trade(_sig(), _pos(size=200.0, qty=2.0))
     engine.close_trade(tid, exit_price=110.0)
-    assert engine.get_portfolio("BTC-USD")["consecutive_losses"] == 0
+    assert engine.get_master_portfolio()["consecutive_losses"] == 0
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -448,6 +452,7 @@ def test_dashboard_handles_only_open_positions(tmp_db_path, tmp_path):
 @pytest.mark.parametrize("n_trades", [1, 2, 5, 10])
 def test_total_trades_matches_count(tmp_db_path, n_trades):
     engine = PaperTradingEngine(db_path=tmp_db_path)
+    engine.COOLDOWN_MINUTES = 0  # test rapid same-symbol cycling
     for i in range(n_trades):
         tid = engine.execute_trade(_sig(), _pos(size=100.0, qty=1.0))
         engine.close_trade(tid, exit_price=105.0)

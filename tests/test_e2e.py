@@ -224,7 +224,8 @@ class TestFullLifecycle:
         assert "momentum" in strat_names
 
     def test_equity_consistent_between_overview_and_markets(self, tmp_db_path, tmp_path):
-        """Sum of per-market equity in /api/markets == total_balance in /api/overview."""
+        """Per-market P&L + allocated capital, summed with master cash, equals
+        /api/overview's total_balance."""
         _run_trade_session(tmp_db_path)
 
         backtest_dir = tmp_path / "bt"
@@ -234,10 +235,14 @@ class TestFullLifecycle:
 
         overview = client.get("/api/overview").get_json()
         cards = client.get("/api/markets").get_json()
-        sum_cards = sum(c["current_balance"] for c in cards)
-        # build_market_grid only covers symbols in markets_meta, which should
-        # match the portfolios on a fresh engine.
-        assert sum_cards == pytest.approx(overview["total_balance"], rel=1e-6)
+        # Each card reports: realised P&L + unrealised P&L + allocated capital.
+        # master_cash + sum(realised+unrealised+allocated) == master_initial + total_pnl
+        #   + open_exposure   (since master_cash = master_initial + realised - allocated)
+        # So overview["total_balance"] == master_initial + total_pnl + unrealised.
+        # Equivalent check: overview total ≈ master_initial + sum(cards.total_pnl).
+        initial = float(overview["total_initial"])
+        sum_card_pnl = sum(c["total_pnl"] for c in cards)
+        assert initial + sum_card_pnl == pytest.approx(overview["total_balance"], rel=1e-6)
 
 
 # ══════════════════════════════════════════════════════════════════════

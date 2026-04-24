@@ -62,7 +62,7 @@ class TestFullTradePipeline:
     """Signal → position sizing → execute → stops → close → P&L."""
 
     def test_happy_path_long_trade_takes_profit(self, engine):
-        """LONG trade reaches TP via check_stops → balance increases by pnl."""
+        """LONG trade reaches TP via check_stops → master balance increases by pnl."""
         signal = _mk_signal(entry=100.0, stop=90.0, tp=115.0)
         pos = calculate_position_size(
             portfolio_balance=10000.0,
@@ -72,7 +72,7 @@ class TestFullTradePipeline:
         )
         assert pos.position_size_usd > 0
 
-        start = engine.get_portfolio("BTC-USD")["current_balance"]
+        start = engine.get_master_portfolio()["current_balance"]
         trade_id = engine.execute_trade(signal, pos)
         assert trade_id is not None
 
@@ -83,9 +83,9 @@ class TestFullTradePipeline:
         assert closed[0]["pnl"] > 0
         assert closed[0]["status"] == "CLOSED"
 
-        portfolio = engine.get_portfolio("BTC-USD")
-        assert portfolio["current_balance"] > start
-        assert portfolio["winning_trades"] == 1
+        master = engine.get_master_portfolio()
+        assert master["current_balance"] > start
+        assert master["winning_trades"] == 1
 
     def test_long_trade_stops_out(self, engine, make_signal, make_position):
         """LONG trade hits stop → status STOPPED, loss recorded."""
@@ -99,9 +99,9 @@ class TestFullTradePipeline:
         assert closed[0]["exit_price"] == pytest.approx(95.0)
         assert closed[0]["pnl"] < 0
 
-        portfolio = engine.get_portfolio("BTC-USD")
-        assert portfolio["losing_trades"] == 1
-        assert portfolio["consecutive_losses"] == 1
+        master = engine.get_master_portfolio()
+        assert master["losing_trades"] == 1
+        assert master["consecutive_losses"] == 1
 
     def test_short_trade_takes_profit(self, engine, make_signal, make_position):
         """SHORT TP: price must fall below tp, not above."""
@@ -113,7 +113,7 @@ class TestFullTradePipeline:
         assert len(closed) == 1
         assert closed[0]["exit_price"] == pytest.approx(90.0)
         assert closed[0]["pnl"] > 0
-        assert engine.get_portfolio("BTC-USD")["winning_trades"] == 1
+        assert engine.get_master_portfolio()["winning_trades"] == 1
 
     def test_short_trade_stops_out_when_price_rises(self, engine, make_signal, make_position):
         """SHORT stop triggers when price RISES above stop."""
@@ -239,8 +239,8 @@ class TestCorrelationAcrossGroup:
 
 class TestEquityTracking:
     def test_equity_invariant_across_many_trades(self, engine, make_signal, make_position):
-        """For many open/close cycles, cash + open_positions ≈ initial + realised_pnl."""
-        initial = engine.get_portfolio("BTC-USD")["initial_balance"]
+        """For many open/close cycles, master cash ≈ initial + realised_pnl."""
+        initial = engine.get_master_portfolio()["initial_balance"]
         total_pnl = 0.0
 
         trades = [
@@ -258,34 +258,31 @@ class TestEquityTracking:
             result = engine.close_trade(tid, exit_price=exit_)
             total_pnl += result["pnl"]
 
-        portfolio = engine.get_portfolio("BTC-USD")
-        assert portfolio["current_balance"] == pytest.approx(initial + total_pnl)
-        assert portfolio["total_pnl"] == pytest.approx(total_pnl)
+        master = engine.get_master_portfolio()
+        assert master["current_balance"] == pytest.approx(initial + total_pnl)
+        assert master["total_pnl"] == pytest.approx(total_pnl)
 
     def test_peak_balance_tracks_high_water_mark(self, engine, make_signal, make_position):
-        """peak_balance monotonically increases, never decreases."""
-        # Winning trade → new peak.
+        """Master peak_balance monotonically increases, never decreases."""
         t1 = engine.execute_trade(make_signal(), make_position(size=500.0, qty=5.0))
         engine.close_trade(t1, exit_price=110.0)  # +$50
-        p1 = engine.get_portfolio("BTC-USD")["peak_balance"]
+        p1 = engine.get_master_portfolio()["peak_balance"]
         assert p1 > 10000.0
 
-        # Losing trade → peak unchanged.
         t2 = engine.execute_trade(make_signal(), make_position(size=500.0, qty=5.0))
         engine.close_trade(t2, exit_price=90.0)  # -$50
-        p2 = engine.get_portfolio("BTC-USD")["peak_balance"]
+        p2 = engine.get_master_portfolio()["peak_balance"]
         assert p2 == pytest.approx(p1)
 
     def test_max_drawdown_updated_from_peak(self, engine, make_signal, make_position):
-        """max_drawdown reflects cumulative losses relative to high-water mark."""
+        """Master max_drawdown reflects cumulative losses relative to high-water mark."""
         t1 = engine.execute_trade(make_signal(), make_position(size=500.0, qty=5.0))
         engine.close_trade(t1, exit_price=115.0)  # +$75 → peak
 
         t2 = engine.execute_trade(make_signal(), make_position(size=500.0, qty=5.0))
         engine.close_trade(t2, exit_price=85.0)  # -$75
 
-        portfolio = engine.get_portfolio("BTC-USD")
-        assert portfolio["max_drawdown"] > 0
+        assert engine.get_master_portfolio()["max_drawdown"] > 0
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -305,8 +302,7 @@ class TestCircuitBreakerFlow:
         closed = engine.close_trade(tid, exit_price=-140.0)
         assert closed["pnl"] < -1000.0
 
-        portfolio = engine.get_portfolio("BTC-USD")
-        assert portfolio["is_circuit_breaker_active"] == 1
+        assert engine.get_master_portfolio()["is_circuit_breaker_active"] == 1
 
         # Trying to open a new trade should now fail at risk-check.
         new_id = engine.execute_trade(
@@ -316,13 +312,12 @@ class TestCircuitBreakerFlow:
         assert new_id is None
 
     def test_allocation_does_not_activate_breaker(self, engine, make_signal, make_position):
-        """Opening a big position does NOT flag the breaker."""
+        """Opening a position (even one that gets clamped) does NOT flag the breaker."""
         engine.execute_trade(
             make_signal(),
-            make_position(size=2500.0, qty=25.0),  # 25% of portfolio
+            make_position(size=2500.0, qty=25.0),  # clamped to MAX_POSITION_SIZE
         )
-        portfolio = engine.get_portfolio("BTC-USD")
-        assert portfolio["is_circuit_breaker_active"] == 0
+        assert engine.get_master_portfolio()["is_circuit_breaker_active"] == 0
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -331,15 +326,16 @@ class TestCircuitBreakerFlow:
 
 
 class TestSnapshots:
-    def test_snapshot_uses_equity_not_cash(self, engine, make_signal, make_position):
-        engine.execute_trade(make_signal(), make_position(size=2000.0, qty=20.0))
-        engine.take_snapshot("BTC-USD")
+    def test_master_snapshot_uses_equity_not_cash(self, engine, make_signal, make_position):
+        engine.execute_trade(make_signal(), make_position(size=400.0, qty=4.0))
+        engine.take_snapshot(engine.MASTER_SYMBOL)
 
         with get_connection(engine.db_path) as conn:
             row = conn.execute(
-                "SELECT balance FROM portfolio_snapshots WHERE symbol = 'BTC-USD'"
+                "SELECT balance FROM portfolio_snapshots WHERE symbol = ?",
+                (engine.MASTER_SYMBOL,),
             ).fetchone()
-        # cash (8000) + allocated (2000) = equity 10000
+        # Master cash (9600) + allocated (400) = equity 10000
         assert row["balance"] == pytest.approx(10000.0)
 
     def test_multiple_snapshots_accumulate(self, engine, make_signal, make_position):
@@ -422,7 +418,7 @@ class TestPositionSizingWithExecution:
     def test_position_size_respects_max_position_pct(self, engine):
         """calculate_position_size should cap at max_position_pct; execute_trade
         can then consume it without exceeding cash."""
-        start = engine.get_portfolio("BTC-USD")["current_balance"]
+        start = engine.get_master_portfolio()["current_balance"]
         pos = calculate_position_size(
             portfolio_balance=start,
             entry_price=100.0,
@@ -438,7 +434,7 @@ class TestPositionSizingWithExecution:
             _mk_signal(entry=100.0, stop=99.0, tp=103.0), pos
         )
         assert tid is not None
-        assert engine.get_portfolio("BTC-USD")["current_balance"] >= 0
+        assert engine.get_master_portfolio()["current_balance"] >= 0
 
     def test_reduced_size_after_consecutive_losses(self, engine, make_signal, make_position):
         """After 3 consecutive losses, execute_trade must halve the position."""
@@ -449,33 +445,27 @@ class TestPositionSizingWithExecution:
             )
             engine.close_trade(tid, exit_price=90.0)  # -$20
 
-        portfolio = engine.get_portfolio("BTC-USD")
-        assert portfolio["consecutive_losses"] == 3
+        assert engine.get_master_portfolio()["consecutive_losses"] == 3
 
-        # Next trade: multiplier = 0.5 → size should be $250 (half of $500)
-        cash_before = portfolio["current_balance"]
+        # Next trade: multiplier = 0.5 → $500 requested becomes $250.
         tid = engine.execute_trade(
             make_signal(entry=100.0, stop=95.0, tp=110.0),
             make_position(size=500.0, qty=5.0, stop=95.0, tp=110.0),
         )
         assert tid is not None
-
-        # The recorded position_size should be halved.
         open_pos = engine.get_open_positions("BTC-USD")[0]
         assert open_pos["position_size"] == pytest.approx(250.0)
 
     def test_streak_resets_after_win(self, engine, make_signal, make_position):
         """A single winning trade resets consecutive_losses to 0."""
-        # 2 losses
         for _ in range(2):
             tid = engine.execute_trade(make_signal(), make_position(size=200.0, qty=2.0))
             engine.close_trade(tid, exit_price=90.0)
-        assert engine.get_portfolio("BTC-USD")["consecutive_losses"] == 2
+        assert engine.get_master_portfolio()["consecutive_losses"] == 2
 
-        # 1 win
         tid = engine.execute_trade(make_signal(), make_position(size=200.0, qty=2.0))
         engine.close_trade(tid, exit_price=110.0)
-        assert engine.get_portfolio("BTC-USD")["consecutive_losses"] == 0
+        assert engine.get_master_portfolio()["consecutive_losses"] == 0
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -493,13 +483,15 @@ class TestEdgeCases:
         # Second close attempt returns None.
         assert engine.close_trade(tid, exit_price=115.0) is None
 
-    def test_execute_trade_rejects_insufficient_balance(self, engine, make_signal, make_position):
-        # Portfolio has $10k — try to open a $20k trade.
+    def test_execute_trade_clamps_oversize_down_to_max(self, engine, make_signal, make_position):
+        """A requested $20k position is clamped down to MAX_POSITION_SIZE, not rejected."""
         tid = engine.execute_trade(
             make_signal(),
             make_position(size=20000.0, qty=200.0),
         )
-        assert tid is None
+        assert tid is not None
+        open_pos = engine.get_open_positions("BTC-USD")[0]
+        assert open_pos["position_size"] == pytest.approx(engine.MAX_POSITION_SIZE)
 
     def test_execute_trade_unknown_symbol_returns_none(self, engine, make_signal, make_position):
         tid = engine.execute_trade(
@@ -514,13 +506,13 @@ class TestEdgeCases:
         assert len(engine.get_all_portfolios()) == len(MARKETS)
 
     def test_daily_pnl_reset(self, engine, make_signal, make_position):
-        """reset_daily_pnl zeros the daily counter."""
+        """reset_daily_pnl zeros the master-level daily counter."""
         tid = engine.execute_trade(make_signal(), make_position(size=500.0, qty=5.0))
         engine.close_trade(tid, exit_price=110.0)
-        assert engine.get_portfolio("BTC-USD")["daily_pnl"] > 0
+        assert engine.get_master_portfolio()["daily_pnl"] > 0
 
         engine.reset_daily_pnl()
-        assert engine.get_portfolio("BTC-USD")["daily_pnl"] == 0.0
+        assert engine.get_master_portfolio()["daily_pnl"] == 0.0
 
     def test_zero_balance_position_sizing_returns_zero(self):
         pos = calculate_position_size(
@@ -561,13 +553,12 @@ class TestEdgeCases:
 class TestRiskManagerIntegrated:
     def test_daily_loss_limit_halts_further_trades(self, engine, make_signal, make_position):
         """Once daily loss breaches 3%, no more trades are accepted."""
-        # Pull off a -$350 realised loss in one shot.
         tid = engine.execute_trade(
             make_signal(entry=100.0),
             make_position(size=500.0, qty=5.0),
         )
         engine.close_trade(tid, exit_price=30.0)  # -350
-        assert engine.get_portfolio("BTC-USD")["daily_pnl"] < -300.0
+        assert engine.get_master_portfolio()["daily_pnl"] < -300.0
 
         # Next trade must be rejected.
         assert engine.execute_trade(
@@ -577,16 +568,13 @@ class TestRiskManagerIntegrated:
 
     def test_drawdown_warning_does_not_block(self, engine, make_signal, make_position):
         """Drawdown in the warning band (8-10%) still allows trading."""
-        # Lose $850 → drawdown = 8.5% (warning band).
         tid = engine.execute_trade(
             make_signal(entry=100.0),
             make_position(size=500.0, qty=5.0),
         )
         engine.close_trade(tid, exit_price=-70.0)  # pnl = (-70-100)*5 = -850
-        portfolio = engine.get_portfolio("BTC-USD")
-        assert portfolio["is_circuit_breaker_active"] == 0
+        assert engine.get_master_portfolio()["is_circuit_breaker_active"] == 0
 
-        # But daily loss limit of 3% would block trading. Reset and retry.
         engine.reset_daily_pnl()
 
         tid2 = engine.execute_trade(

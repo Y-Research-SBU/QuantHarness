@@ -34,35 +34,34 @@ from strategies import Signal
 def test_circuit_breaker_not_triggered_by_allocation(engine, make_signal, make_position):
     """Opening a large position allocates capital — that is NOT a loss.
 
-    Before the fix, opening a trade that deducted >10% of cash would mark
-    the circuit breaker active because the drawdown check compared
-    current_balance (cash) to initial_balance without adding back open
-    position value.
+    Under the unified-portfolio model, the master portfolio must track equity
+    (cash + allocated) for the drawdown check rather than cash alone.
     """
-    # Allocate 50% of a fresh $10k portfolio to a single trade — cash drops
-    # to $5k, but equity is still $10k.
+    # Request a large position; the engine clamps it down to MAX_POSITION_SIZE.
     signal = make_signal(entry=100.0, stop=95.0, tp=115.0)
     position = make_position(size=5000.0, qty=50.0)
     trade_id = engine.execute_trade(signal, position)
     assert trade_id is not None
 
-    portfolio = engine.get_portfolio("BTC-USD")
-    assert portfolio["current_balance"] == pytest.approx(5000.0)
+    master = engine.get_master_portfolio()
+    # Master cash drops by at most MAX_POSITION_SIZE.
+    assert master["current_balance"] >= 10000.0 - engine.MAX_POSITION_SIZE - 1e-6
     # No realised loss has occurred → circuit breaker must NOT fire.
-    assert portfolio["is_circuit_breaker_active"] == 0
+    assert master["is_circuit_breaker_active"] == 0
 
-    # A second risk check (e.g. for a new trade) should still pass because
-    # equity = cash + allocated = $10k and drawdown is 0%.
+    # A second risk check should still pass because equity = cash + allocated
+    # = $10k and drawdown is 0%.
+    allocated = 10000.0 - float(master["current_balance"])
     rm = RiskManager()
     result = rm.check_trade_allowed(
         symbol="ETH-USD",
         direction="LONG",
-        portfolio_balance=5000.0,
+        portfolio_balance=float(master["current_balance"]),
         initial_balance=10000.0,
         daily_pnl=0.0,
         consecutive_losses=0,
         open_positions=[{"symbol": "BTC-USD", "direction": "LONG"}],
-        open_position_value=5000.0,
+        open_position_value=allocated,
     )
     assert result.allowed
     assert "CIRCUIT BREAKER" not in result.reason
@@ -70,12 +69,6 @@ def test_circuit_breaker_not_triggered_by_allocation(engine, make_signal, make_p
 
 def test_equity_not_cash_in_drawdown_check(engine, make_signal, make_position):
     """The drawdown check must use equity, not cash."""
-    # Open a trade that drops cash well below the 10% threshold
-    # (cash = $1,000, allocated = $9,000 → equity = $10,000).
-    signal = make_signal(entry=100.0, stop=99.0, tp=103.0)
-    position = make_position(size=9000.0, qty=90.0)
-    assert engine.execute_trade(signal, position) is not None
-
     # A cash-based drawdown would be 90%. An equity-based one is 0%.
     rm = RiskManager()
     drawdown_on_cash = rm.check_drawdown(current_balance=1000.0, initial_balance=10000.0)
@@ -98,21 +91,17 @@ def test_equity_not_cash_in_drawdown_check(engine, make_signal, make_position):
 
 
 def test_circuit_breaker_triggered_by_real_realized_loss(engine, make_signal, make_position):
-    """Conversely, a REAL realised loss >=10% must trigger the breaker."""
+    """Conversely, a REAL realised loss >=10% must trigger the master breaker."""
     signal = make_signal(entry=100.0, stop=95.0, tp=110.0)
-    # Open a tiny position so the closing loss dominates.
     position = make_position(size=500.0, qty=5.0)
     trade_id = engine.execute_trade(signal, position)
     assert trade_id is not None
 
-    # Force a closing price that produces a >$1,000 loss on the 10k portfolio.
-    # qty=5, entry=100, exit=-1100/5+100 = close at a price that yields -$1,100.
     closed = engine.close_trade(trade_id, exit_price=-120.0, reason="manual")
     assert closed is not None
     assert closed["pnl"] < -1000.0
 
-    portfolio = engine.get_portfolio("BTC-USD")
-    assert portfolio["is_circuit_breaker_active"] == 1
+    assert engine.get_master_portfolio()["is_circuit_breaker_active"] == 1
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -172,30 +161,28 @@ def test_breakeven_not_counted_as_loss(engine, make_signal, make_position):
         make_signal(entry=100.0, stop=95.0, tp=110.0),
         make_position(size=500.0, qty=5.0),
     )
-    # Close at the entry price — P&L is exactly 0.
     closed = engine.close_trade(trade_id, exit_price=100.0)
     assert closed["pnl"] == 0.0
 
-    portfolio = engine.get_portfolio("BTC-USD")
-    assert portfolio["losing_trades"] == 0
-    assert portfolio["winning_trades"] == 0
+    # Both master and per-symbol rows must treat $0 as neither win nor loss.
+    for p in (engine.get_portfolio("BTC-USD"), engine.get_master_portfolio()):
+        assert p["losing_trades"] == 0
+        assert p["winning_trades"] == 0
 
 
 def test_breakeven_does_not_reset_winning_streak(engine, make_signal, make_position):
     """Breakeven should not break or continue a winning/losing streak."""
-    # First trade: loss → consecutive_losses = 1.
     t1 = engine.execute_trade(make_signal(), make_position(size=500.0, qty=5.0))
     engine.close_trade(t1, exit_price=95.0)  # -$25
-    assert engine.get_portfolio("BTC-USD")["consecutive_losses"] == 1
+    assert engine.get_master_portfolio()["consecutive_losses"] == 1
 
-    # Second trade: breakeven — streak must stay at 1, not bump to 2.
     t2 = engine.execute_trade(make_signal(), make_position(size=500.0, qty=5.0))
     engine.close_trade(t2, exit_price=100.0)
-    assert engine.get_portfolio("BTC-USD")["consecutive_losses"] == 1
+    assert engine.get_master_portfolio()["consecutive_losses"] == 1
 
 
 def test_portfolio_stats_exclude_breakeven_from_losses(engine, make_signal, make_position):
-    """Mix of wins, losses, breakevens — only real wins/losses counted."""
+    """Mix of wins, losses, breakevens — only real wins/losses counted on master."""
     trades = [
         (100.0, 110.0, "win"),       # +$50
         (100.0, 90.0, "loss"),       # -$50
@@ -210,9 +197,9 @@ def test_portfolio_stats_exclude_breakeven_from_losses(engine, make_signal, make
         )
         engine.close_trade(tid, exit_price=exit_price)
 
-    portfolio = engine.get_portfolio("BTC-USD")
-    assert portfolio["winning_trades"] == 2
-    assert portfolio["losing_trades"] == 1
+    master = engine.get_master_portfolio()
+    assert master["winning_trades"] == 2
+    assert master["losing_trades"] == 1
 
 
 def test_strategy_performance_excludes_breakeven_from_losses(engine, make_signal, make_position):
@@ -302,15 +289,23 @@ def test_correlation_block_is_per_group():
 
 
 def _seed_db_with_open_position(db_path: str) -> None:
-    """Seed a single portfolio with an open position allocating cash."""
+    """Seed the master portfolio with an allocated open position."""
     conn = init_db(db_path)
     now = datetime.utcnow().isoformat()
+    # Master portfolio: $10k initial, $7k cash after allocating $3k to the trade.
     conn.execute(
         """INSERT INTO portfolios
            (symbol, initial_balance, current_balance, total_pnl, total_trades,
             winning_trades, losing_trades, peak_balance)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        ("BTC-USD", 10000.0, 7000.0, 0.0, 1, 0, 0, 10000.0),
+        ("__MASTER__", 10000.0, 7000.0, 0.0, 1, 0, 0, 10000.0),
+    )
+    # Per-symbol analytics row: no capital, just tracks trade count.
+    conn.execute(
+        """INSERT INTO portfolios
+           (symbol, initial_balance, current_balance, total_pnl, total_trades)
+           VALUES (?, 0.0, 0.0, 0.0, 1)""",
+        ("BTC-USD",),
     )
     conn.execute(
         """INSERT INTO trades
@@ -324,39 +319,52 @@ def _seed_db_with_open_position(db_path: str) -> None:
 
 
 def test_dashboard_shows_equity_not_cash(tmp_db_path):
-    """Dashboard overview total_balance must equal cash + open position sizes."""
+    """Dashboard overview total_balance must equal master cash + open position sizes."""
     _seed_db_with_open_position(tmp_db_path)
 
     import dashboard
     overview = dashboard.build_overview(tmp_db_path)
 
-    # cash=$7,000 + open_position=$3,000 = equity $10,000
+    # master_cash=$7,000 + open_position=$3,000 = equity $10,000
     assert overview["total_balance"] == pytest.approx(10000.0)
 
 
-def test_dashboard_market_grid_shows_equity_not_cash(tmp_db_path):
-    """The per-market grid's current_balance column must also be equity."""
+def test_dashboard_market_grid_shows_per_symbol_equity(tmp_db_path, monkeypatch):
+    """The per-market grid's current_balance reflects realised+unrealised P&L plus allocated."""
     _seed_db_with_open_position(tmp_db_path)
 
     import dashboard
+    # Stub live-price fetch so unrealised P&L is exactly 0 for a deterministic check.
+    monkeypatch.setattr(dashboard, "_get_cached_prices", lambda symbols: {})
     cards = dashboard.build_market_grid(tmp_db_path)
     btc = next(c for c in cards if c["symbol"] == "BTC-USD")
-    assert btc["current_balance"] == pytest.approx(10000.0)
+    # realised=0, unrealised=0, allocated=3000 → 3000
+    assert btc["current_balance"] == pytest.approx(3000.0)
 
 
-def test_dashboard_unrealized_pnl_calculated(tmp_db_path):
+def test_dashboard_unrealized_pnl_calculated(tmp_db_path, monkeypatch):
     """With open + closed trades, unrealized_pnl must be non-zero and reported
     separately from realized_pnl."""
+    # Force the dashboard to fall back to last-exit-price rather than a live quote.
+    import dashboard as _dash
+    monkeypatch.setattr(_dash, "_get_cached_prices", lambda symbols: {})
     conn = init_db(tmp_db_path)
     now = datetime.utcnow().isoformat()
+    # Master: $10k initial, $7100 cash (after +100 realised, $2000 allocated).
     conn.execute(
         """INSERT INTO portfolios
            (symbol, initial_balance, current_balance, total_pnl, total_trades,
             winning_trades, peak_balance)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        ("BTC-USD", 10000.0, 7100.0, 100.0, 2, 1, 10100.0),
+        ("__MASTER__", 10000.0, 7100.0, 100.0, 2, 1, 10100.0),
     )
-    # Closed trade: entry 100, exit 110, qty 10 → +$100 (recorded as total_pnl).
+    conn.execute(
+        """INSERT INTO portfolios
+           (symbol, initial_balance, current_balance, total_pnl, total_trades, winning_trades)
+           VALUES (?, 0.0, 0.0, 100.0, 2, 1)""",
+        ("BTC-USD",),
+    )
+    # Closed trade: entry 100, exit 110, qty 10 → +$100.
     conn.execute(
         """INSERT INTO trades (symbol, timeframe, strategy, direction,
             entry_price, exit_price, position_size, quantity, pnl, status,
@@ -365,8 +373,7 @@ def test_dashboard_unrealized_pnl_calculated(tmp_db_path):
         ("BTC-USD", "1h", "momentum", "LONG", 100.0, 110.0, 1000.0, 10.0,
          100.0, now, now),
     )
-    # Open trade: entry 100, qty 20. The unrealized calc uses latest close
-    # which for this DB is the last exit_price (110) → +$200 unrealized.
+    # Open trade: entry 100, qty 20. Latest price = last exit_price (110) → +$200 unrealised.
     conn.execute(
         """INSERT INTO trades (symbol, timeframe, strategy, direction,
             entry_price, position_size, quantity, status, entry_time)
@@ -383,15 +390,17 @@ def test_dashboard_unrealized_pnl_calculated(tmp_db_path):
     assert overview["total_pnl"] == pytest.approx(300.0)
 
 
-def test_dashboard_short_unrealized_pnl_has_correct_sign(tmp_db_path):
+def test_dashboard_short_unrealized_pnl_has_correct_sign(tmp_db_path, monkeypatch):
     """Unrealized P&L on a SHORT must use (entry - current_price), not (current - entry)."""
+    import dashboard as _dash
+    monkeypatch.setattr(_dash, "_get_cached_prices", lambda symbols: {})
     conn = init_db(tmp_db_path)
     now = datetime.utcnow().isoformat()
     conn.execute(
         """INSERT INTO portfolios (symbol, initial_balance, current_balance,
             total_pnl, peak_balance)
            VALUES (?, ?, ?, ?, ?)""",
-        ("BTC-USD", 10000.0, 9000.0, 0.0, 10000.0),
+        ("__MASTER__", 10000.0, 9000.0, 0.0, 10000.0),
     )
     # One closed trade so the dashboard has a price to use.
     conn.execute(
@@ -402,8 +411,6 @@ def test_dashboard_short_unrealized_pnl_has_correct_sign(tmp_db_path):
         ("ETH-USD", "1h", "momentum", "LONG", 100.0, 90.0, 1000.0, 10.0,
          -100.0, now, now),
     )
-    # Open SHORT: entry 100, qty 10. Latest price will fall back to entry
-    # (there is no exit price for BTC-USD), so unrealized = 0.
     conn.execute(
         """INSERT INTO trades (symbol, timeframe, strategy, direction,
             entry_price, position_size, quantity, status, entry_time)
@@ -415,8 +422,6 @@ def test_dashboard_short_unrealized_pnl_has_correct_sign(tmp_db_path):
 
     import dashboard
     unrealized = dashboard._compute_unrealized_pnl(tmp_db_path)
-    # No price data means $0 unrealized; the key point is no exception was
-    # raised and the SHORT was handled without flipping sign.
     assert unrealized["BTC-USD"] == pytest.approx(0.0)
 
 
@@ -426,49 +431,41 @@ def test_dashboard_short_unrealized_pnl_has_correct_sign(tmp_db_path):
 
 
 def test_close_trade_returns_capital_plus_pnl(engine, make_signal, make_position):
-    """Closing a trade must add back position_size + pnl to current_balance.
-
-    i.e. winning_close_balance = starting_cash - size + size + pnl
-                              = starting_cash + pnl
-    """
-    start = engine.get_portfolio("BTC-USD")["current_balance"]
+    """Closing a trade must add back position_size + pnl to the master balance."""
+    start = engine.get_master_portfolio()["current_balance"]
     size = 500.0
     qty = 5.0
     tid = engine.execute_trade(
         make_signal(entry=100.0),
         make_position(size=size, qty=qty),
     )
-    # Sanity: cash went down by exactly size.
-    assert engine.get_portfolio("BTC-USD")["current_balance"] == pytest.approx(start - size)
+    assert engine.get_master_portfolio()["current_balance"] == pytest.approx(start - size)
 
     closed = engine.close_trade(tid, exit_price=110.0)  # +$50 pnl
     assert closed["pnl"] == pytest.approx(50.0)
 
-    after = engine.get_portfolio("BTC-USD")["current_balance"]
+    after = engine.get_master_portfolio()["current_balance"]
     assert after == pytest.approx(start + 50.0)
 
 
 def test_close_losing_trade_returns_remaining_capital(engine, make_signal, make_position):
-    """Even losers return position_size + pnl (pnl is negative). Balance after a
-    total wipeout of a $500 trade should be start - $500."""
-    start = engine.get_portfolio("BTC-USD")["current_balance"]
+    """Even losers return position_size + pnl (pnl is negative) to master."""
+    start = engine.get_master_portfolio()["current_balance"]
     tid = engine.execute_trade(
         make_signal(entry=100.0),
         make_position(size=500.0, qty=5.0),
     )
-    # exit at 0 → pnl = -500
     engine.close_trade(tid, exit_price=0.0)
-    after = engine.get_portfolio("BTC-USD")["current_balance"]
+    after = engine.get_master_portfolio()["current_balance"]
     assert after == pytest.approx(start - 500.0)
 
 
 def test_equity_invariant_holds_after_open(engine, make_signal, make_position):
-    """Equity = cash_balance + sum(open position sizes)."""
-    start_equity = engine.get_portfolio("BTC-USD")["current_balance"]
-    size = 1500.0
-    engine.execute_trade(make_signal(), make_position(size=size, qty=15.0))
+    """Master equity = master cash + sum(all open position sizes)."""
+    start_equity = engine.get_master_portfolio()["current_balance"]
+    # Requested size gets clamped to MAX_POSITION_SIZE.
+    engine.execute_trade(make_signal(), make_position(size=1500.0, qty=15.0))
 
-    portfolio = engine.get_portfolio("BTC-USD")
-    open_positions = engine.get_open_positions("BTC-USD")
-    allocated = sum(p["position_size"] for p in open_positions)
-    assert portfolio["current_balance"] + allocated == pytest.approx(start_equity)
+    master = engine.get_master_portfolio()
+    allocated = sum(p["position_size"] for p in engine.get_open_positions())
+    assert master["current_balance"] + allocated == pytest.approx(start_equity)

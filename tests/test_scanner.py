@@ -105,3 +105,45 @@ def test_scanner_default_symbols(tmp_db_path, patched_fetcher):
     # Use only 1 symbol via override — but verify the default would be all markets.
     result = scanner.run_scan_cycle(symbols=["BTC-USD", "ETH-USD"])
     assert result["markets_scanned"] == 2
+
+
+def test_run_scan_cycle_marks_open_positions_to_market(tmp_db_path, patched_fetcher):
+    """Scan cycle must refresh unrealised P&L on open positions."""
+    from market_config import StrategyType
+    from paper_trading import PaperTradingEngine
+    from position_sizing import PositionSizeResult
+    from strategies import Signal
+
+    scanner = MarketScanner(db_path=tmp_db_path, use_self_improvement=False, use_kronos=False)
+    scanner.engine.COOLDOWN_MINUTES = 0
+
+    # Seed one open LONG trade on BTC-USD @ 100.
+    signal = Signal(
+        direction="LONG", strength=0.8, strategy=StrategyType.MOMENTUM,
+        symbol="BTC-USD", timeframe="4h",
+        entry_price=100.0, stop_loss=80.0, take_profit=200.0,
+        risk_reward_ratio=2.0, reasoning="test", metadata={},
+    )
+    pos = PositionSizeResult(
+        position_size_usd=500.0, quantity=5.0, risk_per_trade_usd=10.0,
+        risk_pct=0.02, kelly_fraction=0.2, half_kelly=0.1,
+        stop_loss=80.0, take_profit=200.0, reason="test",
+    )
+    tid = scanner.engine.execute_trade(signal, pos)
+    assert tid is not None
+
+    # Spy on mark_to_market to confirm it runs during the scan cycle.
+    real_m2m = scanner.engine.mark_to_market
+    calls = {"n": 0}
+
+    def spy(prices):
+        calls["n"] += 1
+        return real_m2m(prices)
+
+    scanner.engine.mark_to_market = spy  # type: ignore[assignment]
+
+    result = scanner.run_scan_cycle(symbols=["BTC-USD"])
+    assert calls["n"] == 1
+    # The scanner surfaces the summary fields it got back.
+    assert "unrealized_pnl" in result
+    assert result["positions_marked"] == 1

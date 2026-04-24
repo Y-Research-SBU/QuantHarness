@@ -147,7 +147,22 @@ def oversold_ohlcv() -> pd.DataFrame:
 
 @pytest.fixture
 def engine(tmp_db_path):
-    """Fresh PaperTradingEngine on an isolated temp SQLite database."""
+    """Fresh PaperTradingEngine on an isolated temp SQLite database.
+
+    Post-close cooldown is disabled here so tests that rapidly open-and-close
+    the same symbol (streaks, invariant checks, equity sequences) still run.
+    Tests that specifically exercise cooldown behavior use the
+    ``engine_with_cooldown`` fixture below.
+    """
+    from paper_trading import PaperTradingEngine
+    engine = PaperTradingEngine(db_path=tmp_db_path)
+    engine.COOLDOWN_MINUTES = 0
+    return engine
+
+
+@pytest.fixture
+def engine_with_cooldown(tmp_db_path):
+    """PaperTradingEngine with the production-default 30-min cooldown active."""
     from paper_trading import PaperTradingEngine
     return PaperTradingEngine(db_path=tmp_db_path)
 

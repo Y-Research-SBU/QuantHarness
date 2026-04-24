@@ -36,7 +36,8 @@ logger = logging.getLogger(__name__)
 
 
 # Default paths (can be overridden by tests via create_app()).
-DEFAULT_DB_PATH = "paper_trades.db"
+# Use /data/ on Railway (persistent volume) or local file
+DEFAULT_DB_PATH = os.environ.get("DB_PATH", "/data/paper_trades.db" if os.path.isdir("/data") else "paper_trades.db")
 DEFAULT_BACKTEST_DIR = "backtest_results"
 
 

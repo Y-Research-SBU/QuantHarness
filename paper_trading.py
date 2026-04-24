@@ -58,7 +58,7 @@ class PaperTradingEngine:
     # symbol, pause that symbol for SYMBOL_CB_COOLDOWN_MINUTES. Prevents the
     # bot from repeatedly shorting into a rally (INJ-USD problem).
     SYMBOL_CB_MAX_CONSECUTIVE_LOSSES = 3
-    SYMBOL_CB_COOLDOWN_MINUTES = 120  # 2 hours
+    SYMBOL_CB_COOLDOWN_MINUTES = 480  # 8 hours (was 2h, increased after INJ-USD kept re-entering)
 
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path

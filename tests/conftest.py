@@ -18,6 +18,10 @@ if str(ROOT) not in sys.path:
 # Provide a stub API key so modules that validate at import time don't crash.
 os.environ.setdefault("OPENAI_API_KEY", "test-key-not-real")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-key-not-real")
+# The dashboard module instantiates a module-level ``app = create_app()`` for
+# gunicorn. In tests we never want that to spin up the Binance WS / yfinance
+# background threads — they add noise and hammer external endpoints.
+os.environ.setdefault("DASHBOARD_DISABLE_PRICE_FEED", "1")
 
 
 @pytest.fixture

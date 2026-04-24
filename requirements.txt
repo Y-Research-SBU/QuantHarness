@@ -1,4 +1,8 @@
 flask
+flask-socketio
+python-socketio
+websocket-client
+eventlet
 yfinance
 pandas
 numpy

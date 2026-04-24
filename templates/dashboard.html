@@ -6,6 +6,7 @@
   <title>QuantAgent Dashboard</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <style>
     html, body { background-color: #0b0f17; color: #e5e7eb; }
     .card { background: #111826; border: 1px solid #1f2937; }
@@ -25,11 +26,44 @@
       animation: pulse 2s infinite;
       display: inline-block;
     }
+    .pulse-dot.offline {
+      background-color: #6b7280;
+      animation: none;
+      box-shadow: none;
+    }
     @keyframes pulse {
       0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
       70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
       100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
     }
+    /* Price-change flash animations — applied to any element with a .px-* binding */
+    @keyframes flashUp {
+      0% { background-color: rgba(16, 185, 129, 0.45); }
+      100% { background-color: transparent; }
+    }
+    @keyframes flashDown {
+      0% { background-color: rgba(239, 68, 68, 0.45); }
+      100% { background-color: transparent; }
+    }
+    .flash-up { animation: flashUp 0.8s ease-out; border-radius: 3px; }
+    .flash-down { animation: flashDown 0.8s ease-out; border-radius: 3px; }
+    /* Position-indicator cards */
+    .pos-border-profit { border-left: 3px solid #10b981; }
+    .pos-border-loss   { border-left: 3px solid #ef4444; }
+    .pos-dot {
+      width: 6px; height: 6px; border-radius: 9999px;
+      display: inline-block; margin-left: 6px;
+      background-color: #38bdf8;
+      box-shadow: 0 0 6px rgba(56, 189, 248, 0.9);
+    }
+    /* Collapsible section chevrons */
+    .chev {
+      display: inline-block; width: 10px; height: 10px;
+      border-right: 2px solid #9ca3af; border-bottom: 2px solid #9ca3af;
+      transform: rotate(-45deg); transition: transform 0.15s ease;
+      margin-right: 4px;
+    }
+    .chev.open { transform: rotate(45deg); }
     /* Sparkline canvases */
     .sparkline { width: 100%; height: 40px; }
     /* Scrollbar */
@@ -51,8 +85,8 @@
     <div class="flex items-center gap-4 text-sm">
       <span id="last-update" class="muted">—</span>
       <span class="flex items-center gap-2">
-        <span class="pulse-dot"></span>
-        <span class="muted">LIVE</span>
+        <span id="live-dot" class="pulse-dot offline"></span>
+        <span id="live-label" class="muted">OFFLINE</span>
       </span>
     </div>
   </header>
@@ -98,13 +132,28 @@
       </div>
     </section>
 
-    <!-- MARKET GRID -->
+    <!-- MY POSITIONS (top) -->
+    <section id="my-positions-section" class="card rounded-lg hidden" style="border-color:#1f2937;">
+      <div class="card-header px-5 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <h2 class="text-sm font-semibold tracking-wider uppercase text-emerald-400">My Positions</h2>
+          <span id="my-positions-count" class="text-xs muted">0 positions</span>
+        </div>
+        <div class="text-xs muted flex items-center gap-4">
+          <span>Exposure <span id="my-positions-exposure" class="monospace text-gray-200">$0</span></span>
+          <span>Unrealized <span id="my-positions-pnl" class="monospace">—</span></span>
+        </div>
+      </div>
+      <div id="my-positions-grid" class="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-3"></div>
+    </section>
+
+    <!-- MARKET GRID (grouped by asset class) -->
     <section class="card rounded-lg">
       <div class="card-header px-5 py-3 flex items-center justify-between">
         <h2 class="text-sm font-semibold tracking-wider uppercase muted">Market Grid</h2>
         <div class="text-xs muted"><span id="grid-count">0</span> markets</div>
       </div>
-      <div id="market-grid" class="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3"></div>
+      <div id="market-sections" class="p-4 space-y-3"></div>
     </section>
 
     <!-- STRATEGY PERFORMANCE -->

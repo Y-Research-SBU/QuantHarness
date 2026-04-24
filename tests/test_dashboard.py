@@ -17,28 +17,42 @@ from db_schema import init_db
 @pytest.fixture
 def seeded_db(tmp_db_path):
     """Populate the temp DB with a realistic slice of portfolios, trades,
-    snapshots and strategy_performance rows — enough to exercise every API."""
+    snapshots and strategy_performance rows — enough to exercise every API.
+
+    Uses the unified-portfolio model: one MASTER row that holds all capital,
+    plus per-symbol analytics rows that only track P&L and trade counts.
+    """
     conn = init_db(tmp_db_path)
 
     now = datetime.utcnow()
     t_now = now.strftime("%Y-%m-%dT%H:%M:%S")
 
-    # Portfolios (3 markets: one profitable, one losing, one neutral)
+    # Master portfolio: $10k initial, +$100 realised, $10100 cash.
+    # ETH's loss streak drove the circuit breaker flag at master level.
+    conn.execute(
+        """INSERT INTO portfolios
+           (symbol, initial_balance, current_balance, total_pnl,
+            total_trades, winning_trades, losing_trades, consecutive_losses,
+            max_drawdown, peak_balance, is_circuit_breaker_active, daily_pnl)
+           VALUES ('__MASTER__', 10000.0, 10100.0, 100.0,
+                   11, 5, 6, 2, 0.15, 10200.0, 1, 0.0)""",
+    )
+
+    # Per-symbol analytics rows (no capital; P&L + win/loss counts only).
     portfolios = [
-        # symbol, initial, current, pnl, trades, wins, losses, cons_loss,
-        # max_dd, peak, breaker, daily_pnl
-        ("BTC-USD", 10000.0, 11500.0, 1500.0, 5, 3, 2, 0, 0.05, 11500.0, 0, 0.0),
-        ("ETH-USD", 10000.0, 8500.0, -1500.0, 4, 1, 3, 2, 0.15, 10200.0, 1, 0.0),
-        ("SPY", 10000.0, 10100.0, 100.0, 2, 1, 1, 0, 0.02, 10200.0, 0, 0.0),
+        # symbol, pnl, trades, wins, losses, cons_loss, daily_pnl
+        ("BTC-USD", 1500.0, 5, 3, 2, 0, 0.0),
+        ("ETH-USD", -1500.0, 4, 1, 3, 2, 0.0),
+        ("SPY", 100.0, 2, 1, 1, 0, 0.0),
     ]
-    for (sym, init, cur, pnl, n, w, l, cl, dd, peak, br, dpnl) in portfolios:
+    for (sym, pnl, n, w, l, cl, dpnl) in portfolios:
         conn.execute(
             """INSERT INTO portfolios
                (symbol, initial_balance, current_balance, total_pnl,
                 total_trades, winning_trades, losing_trades, consecutive_losses,
                 max_drawdown, peak_balance, is_circuit_breaker_active, daily_pnl)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (sym, init, cur, pnl, n, w, l, cl, dd, peak, br, dpnl),
+               VALUES (?, 0.0, 0.0, ?, ?, ?, ?, ?, 0.0, 0.0, 0, ?)""",
+            (sym, pnl, n, w, l, cl, dpnl),
         )
 
     # Trades (mix of OPEN / CLOSED / STOPPED across strategies)
@@ -197,11 +211,10 @@ def test_api_overview_aggregates_portfolios(client):
     assert r.status_code == 200
     data = r.get_json()
 
-    # Cash: 11500 + 8500 + 10100 = 30100; plus 1 OPEN trade with position_size=1000
-    # Equity = cash + open_value = 30100 + 1000 = 31100
-    assert data["total_balance"] == pytest.approx(31100.0)
-    assert data["total_initial"] == pytest.approx(30000.0)
-    # total_pnl = realized (100) + unrealized (from open ETH trade)
+    # Master cash: 10100; plus 1 OPEN trade with position_size=1000
+    # Equity = 10100 + 1000 = 11100
+    assert data["total_balance"] == pytest.approx(11100.0)
+    assert data["total_initial"] == pytest.approx(10000.0)
     assert data["is_profitable"] is True
     assert data["open_positions"] == 1  # one OPEN trade above
     assert "markets_tracked" in data
@@ -264,9 +277,11 @@ def test_api_markets_returns_all_configured_markets(client):
 
 
 def test_api_markets_flags_circuit_breaker(client):
+    """With a unified master portfolio, the breaker flag is global; every
+    card reports the same master-level flag."""
     rows = client.get("/api/markets").get_json()
-    eth = next(r for r in rows if r["symbol"] == "ETH-USD")
-    assert eth["circuit_breaker"] is True
+    # Master breaker is active in the fixture, so all cards report True.
+    assert all(r["circuit_breaker"] is True for r in rows)
 
 
 def test_api_markets_sparkline_populated(client):
@@ -432,9 +447,8 @@ def test_api_backtests_malformed_file_ignored(tmp_db_path, tmp_path):
 
 def test_build_overview_math(seeded_db):
     ov = dashboard.build_overview(seeded_db)
-    # Equity = cash (30100) + open position value (1000) = 31100
-    assert ov["total_balance"] == pytest.approx(31100.0)
-    # total_pnl includes realized + unrealized
+    # Equity = master cash (10100) + open position value (1000) = 11100
+    assert ov["total_balance"] == pytest.approx(11100.0)
     assert ov["open_positions"] == 1
     assert ov["is_profitable"] is True
 
@@ -443,8 +457,9 @@ def test_build_market_grid_structure(seeded_db):
     grid = dashboard.build_market_grid(seeded_db)
     assert len(grid) >= 3
     btc = next(c for c in grid if c["symbol"] == "BTC-USD")
-    assert btc["current_balance"] == pytest.approx(11500.0)
-    assert btc["pnl_pct"] == pytest.approx(15.0)  # 1500 / 10000
+    # BTC: realised=1500, unrealised=0, allocated=0 → 1500
+    assert btc["current_balance"] == pytest.approx(1500.0)
+    assert btc["pnl_pct"] == pytest.approx(15.0)  # 1500 / 10000 master initial
     assert btc["latest_signal"]["strategy"] == "momentum"
 
 
@@ -476,3 +491,141 @@ def test_create_app_uses_defaults(tmp_path, monkeypatch):
     assert app is not None
     assert app.config["DB_PATH"] == dashboard.DEFAULT_DB_PATH
     assert app.config["BACKTEST_DIR"] == dashboard.DEFAULT_BACKTEST_DIR
+
+
+# ──────────────────────────── /api/market_categories ────────────────────────────
+
+
+def test_api_market_categories_groups_by_asset_class(client):
+    r = client.get("/api/market_categories")
+    assert r.status_code == 200
+    data = r.get_json()
+
+    # Top-level shape
+    assert "positions" in data
+    assert "sections" in data
+
+    ids = [s["id"] for s in data["sections"]]
+    # We only emit sections that have at least one market. The seeded DB
+    # references markets from MARKETS (crypto + stocks) so both should appear.
+    assert "crypto" in ids
+    assert "stocks" in ids
+
+    for section in data["sections"]:
+        assert "display_name" in section
+        assert "count" in section
+        assert "markets" in section
+        assert section["count"] == len(section["markets"])
+        # Summary fields the frontend renders in the collapsed header.
+        for key in ("with_signals", "with_positions", "unrealized_pnl"):
+            assert key in section
+
+
+def test_api_market_categories_display_names(client):
+    """Spec says: 'Crypto', 'Stocks & ETFs', 'Commodities', 'Forex'."""
+    data = client.get("/api/market_categories").get_json()
+    display = {s["id"]: s["display_name"] for s in data["sections"]}
+    assert display.get("crypto") == "Crypto"
+    assert display.get("stocks") == "Stocks & ETFs"
+    # Commodities/forex are optional (depending on seeded data).
+    if "commodities" in display:
+        assert display["commodities"] == "Commodities"
+    if "forex" in display:
+        assert display["forex"] == "Forex"
+
+
+def test_api_market_categories_section_order(client):
+    data = client.get("/api/market_categories").get_json()
+    ids = [s["id"] for s in data["sections"]]
+    # Order: crypto → stocks → commodities → forex (when present).
+    expected_order = [c for c in ("crypto", "stocks", "commodities", "forex") if c in ids]
+    assert ids == expected_order
+
+
+def test_api_market_categories_my_positions_block(client):
+    data = client.get("/api/market_categories").get_json()
+    pos = data["positions"]
+    assert "cards" in pos
+    assert "count" in pos
+    assert "total_exposure" in pos
+    assert "unrealized_pnl" in pos
+    assert pos["count"] == len(pos["cards"])
+
+    # The seeded fixture has exactly one open ETH-USD LONG trade.
+    assert pos["count"] == 1
+    card = pos["cards"][0]
+    assert card["symbol"] == "ETH-USD"
+    assert card["direction"] == "LONG"
+    # Spec: card includes direction, entry, unrealized P&L, size, strategy,
+    # TradingView symbol, display name.
+    for key in ("trade_id", "display_name", "category", "tv_symbol",
+                "entry_price", "strategy", "position_size", "unrealized_pnl"):
+        assert key in card
+    assert card["position_size"] == pytest.approx(1000.0)
+    # The seeded strategy for the open trade is "kronos_divergence".
+    assert card["strategy"] == "kronos_divergence"
+
+
+def test_api_market_categories_with_positions_flag(client):
+    """Sections should surface which markets have open positions."""
+    data = client.get("/api/market_categories").get_json()
+    crypto = next(s for s in data["sections"] if s["id"] == "crypto")
+    # The seeded DB has one open ETH position — the crypto section should
+    # reflect it in its summary.
+    assert crypto["with_positions"] >= 1
+
+
+def test_api_market_categories_drops_empty_sections(tmp_db_path, tmp_path):
+    """Sections with no markets must not appear in the response."""
+    from db_schema import init_db
+    init_db(tmp_db_path)
+    app = dashboard.create_app(db_path=tmp_db_path, backtest_dir=str(tmp_path))
+    data = app.test_client().get("/api/market_categories").get_json()
+    # Even with an empty DB, the dashboard carries the full market roster
+    # from market_config.MARKETS. Every section returned must have ≥1 market.
+    for section in data["sections"]:
+        assert section["count"] > 0
+
+
+def test_api_market_categories_no_open_positions_empty_block(tmp_db_path, tmp_path):
+    from db_schema import init_db
+    init_db(tmp_db_path)
+    app = dashboard.create_app(db_path=tmp_db_path, backtest_dir=str(tmp_path))
+    data = app.test_client().get("/api/market_categories").get_json()
+    assert data["positions"]["count"] == 0
+    assert data["positions"]["cards"] == []
+    assert data["positions"]["total_exposure"] == 0
+    assert data["positions"]["unrealized_pnl"] == 0
+
+
+def test_build_market_categories_position_pnl_math(seeded_db):
+    """The My Positions block aggregates unrealized_pnl correctly."""
+    data = dashboard.build_market_categories(seeded_db)
+    pos = data["positions"]
+    expected = sum(c["unrealized_pnl"] for c in pos["cards"])
+    assert pos["unrealized_pnl"] == pytest.approx(expected)
+
+
+# ──────────────────────────── /api/prices + WS bootstrap ────────────────────────────
+
+
+def test_api_prices_returns_empty_when_feed_disabled(client):
+    r = client.get("/api/prices")
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data == {"prices": {}, "ws_connected": False}
+
+
+def test_socketio_available_when_package_installed(app):
+    """When flask-socketio is installed create_app should register a
+    SocketIO instance in app.extensions."""
+    import dashboard as _d
+    if _d.SocketIO is None:  # pragma: no cover — only skipped in deps-less envs
+        pytest.skip("flask-socketio not installed")
+    assert "socketio" in app.extensions
+
+
+def test_price_feed_not_started_in_tests(app):
+    """TESTING=True and DASHBOARD_DISABLE_PRICE_FEED=1 must both keep the
+    background WS/polling threads out of the way."""
+    assert "price_feed" not in app.extensions

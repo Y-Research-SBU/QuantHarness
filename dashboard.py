@@ -24,12 +24,20 @@ import json
 import logging
 import os
 import sqlite3
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from flask import Flask, jsonify, render_template, request as flask_request, send_from_directory
+
+try:
+    from flask_socketio import SocketIO  # type: ignore
+except ImportError:  # pragma: no cover — optional at import time
+    SocketIO = None  # type: ignore
+
+from price_feed import PriceFeed, compute_unrealized_pnl as _pnl
 
 
 logger = logging.getLogger(__name__)
@@ -219,12 +227,31 @@ def _rows_to_dicts(rows) -> List[Dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+MASTER_SYMBOL = "__MASTER__"
+
+
 def _query_portfolios(db_path: str) -> List[Dict[str, Any]]:
+    """Per-symbol analytics rows only (excludes the master portfolio row)."""
     if not Path(db_path).exists():
         return []
     with _connect(db_path) as conn:
-        rows = conn.execute("SELECT * FROM portfolios ORDER BY symbol").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM portfolios WHERE symbol != ? ORDER BY symbol",
+            (MASTER_SYMBOL,),
+        ).fetchall()
         return _rows_to_dicts(rows)
+
+
+def _query_master_portfolio(db_path: str) -> Optional[Dict[str, Any]]:
+    """The single unified master portfolio row, if present."""
+    if not Path(db_path).exists():
+        return None
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM portfolios WHERE symbol = ?",
+            (MASTER_SYMBOL,),
+        ).fetchone()
+        return dict(row) if row else None
 
 
 def _query_trades(
@@ -510,17 +537,21 @@ def _compute_unrealized_pnl(db_path: str) -> Dict[str, float]:
 
 
 def build_overview(db_path: str) -> Dict[str, Any]:
-    portfolios = _query_portfolios(db_path)
+    master = _query_master_portfolio(db_path)
     open_positions = _query_trades(db_path, limit=1000, status="OPEN")
 
-    # Equity = cash balance + open position sizes (allocated capital)
-    total_cash = sum(float(p["current_balance"]) for p in portfolios)
+    # Master cash + all open position values = equity
     total_open_value = sum(float(t.get("position_size", 0)) for t in open_positions)
-    total_equity = total_cash + total_open_value
-    total_initial = sum(float(p["initial_balance"]) for p in portfolios)
+    if master:
+        total_cash = float(master["current_balance"])
+        total_initial = float(master["initial_balance"])
+        realized_pnl = float(master["total_pnl"])
+    else:
+        total_cash = 0.0
+        total_initial = 0.0
+        realized_pnl = 0.0
+    total_equity = total_cash + total_open_value if master else 0.0
 
-    # Realized + unrealized
-    realized_pnl = sum(float(p["total_pnl"]) for p in portfolios)
     unrealized = _compute_unrealized_pnl(db_path)
     unrealized_pnl = sum(unrealized.values())
     total_pnl = realized_pnl + unrealized_pnl
@@ -528,6 +559,7 @@ def build_overview(db_path: str) -> Dict[str, Any]:
 
     markets_meta = _load_markets_meta()
     scanner = _query_scanner_status(db_path)
+    portfolios = _query_portfolios(db_path)
 
     return {
         "total_balance": total_equity,
@@ -545,9 +577,114 @@ def build_overview(db_path: str) -> Dict[str, Any]:
     }
 
 
+def build_market_categories(db_path: str) -> Dict[str, Any]:
+    """Group markets by asset-class category for the redesigned grid.
+
+    Returns a dict with a pre-computed ``positions`` section (markets the user
+    is currently in) and one section per :class:`MarketCategory`. Each section
+    carries lightweight summary metrics so the frontend can render the
+    collapsed header without needing the full card list.
+    """
+    cards = build_market_grid(db_path)
+    by_symbol = {c["symbol"]: c for c in cards}
+    positions = build_positions_detail(db_path)
+
+    # Aggregate positions by symbol → pick up display fields directly.
+    pos_by_symbol: Dict[str, List[Dict[str, Any]]] = {}
+    for p in positions:
+        pos_by_symbol.setdefault(p["symbol"], []).append(p)
+
+    # Build "My Positions" rows by flattening one row per open trade. The
+    # frontend wants per-trade cards (an account can hold multiple trades in
+    # the same symbol), so we emit them 1:1 and attach the card metadata.
+    position_cards: List[Dict[str, Any]] = []
+    for p in positions:
+        base = by_symbol.get(p["symbol"], {})
+        position_cards.append({
+            "trade_id": p.get("id"),
+            "symbol": p["symbol"],
+            "display_name": p.get("display_name", p["symbol"]),
+            "category": p.get("category", base.get("category", "unknown")),
+            "tv_symbol": p.get("tv_symbol", base.get("tv_symbol", p["symbol"])),
+            "direction": p.get("direction", ""),
+            "strategy": p.get("strategy", ""),
+            "entry_price": p.get("entry_price"),
+            "current_price": p.get("current_price"),
+            "stop_loss": p.get("stop_loss"),
+            "take_profit": p.get("take_profit"),
+            "quantity": p.get("quantity"),
+            "position_size": p.get("position_size"),
+            "unrealized_pnl": p.get("unrealized_pnl"),
+            "unrealized_pct": p.get("unrealized_pct"),
+            "entry_time": p.get("entry_time"),
+            "rationale": p.get("rationale", ""),
+            "is_profitable": (p.get("unrealized_pnl") or 0) >= 0,
+        })
+
+    position_cards.sort(
+        key=lambda c: (c.get("unrealized_pnl") or 0),
+        reverse=True,
+    )
+
+    # Known asset classes in the order we want them to appear in the UI.
+    category_order = ["crypto", "stocks", "commodities", "forex"]
+    display_name = {
+        "crypto": "Crypto",
+        "stocks": "Stocks & ETFs",
+        "commodities": "Commodities",
+        "forex": "Forex",
+    }
+
+    groups: Dict[str, List[Dict[str, Any]]] = {c: [] for c in category_order}
+    for card in cards:
+        cat = card.get("category", "unknown")
+        groups.setdefault(cat, []).append(card)
+
+    sections: List[Dict[str, Any]] = []
+    total_exposure = sum(float(p.get("position_size") or 0) for p in position_cards)
+    total_unrealized = sum(float(p.get("unrealized_pnl") or 0) for p in position_cards)
+
+    for cat in list(groups.keys()):
+        markets = groups[cat]
+        if not markets:
+            continue
+        with_signals = sum(1 for m in markets if m.get("latest_signal"))
+        with_positions = sum(1 for m in markets if (m.get("open_positions") or 0) > 0)
+        positions_pnl = sum(
+            float(p.get("unrealized_pnl") or 0)
+            for p in position_cards if p.get("category") == cat
+        )
+        sections.append({
+            "id": cat,
+            "display_name": display_name.get(cat, cat.title()),
+            "markets": markets,
+            "count": len(markets),
+            "with_signals": with_signals,
+            "with_positions": with_positions,
+            "unrealized_pnl": positions_pnl,
+        })
+
+    return {
+        "positions": {
+            "cards": position_cards,
+            "count": len(position_cards),
+            "total_exposure": total_exposure,
+            "unrealized_pnl": total_unrealized,
+        },
+        "sections": sections,
+    }
+
+
 def build_market_grid(db_path: str) -> List[Dict[str, Any]]:
-    """Per-market card data: equity, P&L (realized+unrealized), drawdown, sparkline, latest signal."""
+    """Per-market card data: P&L breakdown, open positions, sparkline, latest signal.
+
+    In the unified-portfolio model, only the master row holds capital; per-symbol
+    rows track realised P&L / trade counts. Each card reports cumulative P&L
+    (realised + unrealised + currently-allocated capital) rather than a
+    per-market balance.
+    """
     portfolios = _query_portfolios(db_path)
+    master = _query_master_portfolio(db_path)
     markets_meta = _load_markets_meta()
     open_trades = _query_trades(db_path, limit=1000, status="OPEN")
     unrealized_by_sym = _compute_unrealized_pnl(db_path)
@@ -562,25 +699,30 @@ def build_market_grid(db_path: str) -> List[Dict[str, Any]]:
         open_value_by_sym[s] = open_value_by_sym.get(s, 0) + float(t.get("position_size", 0))
         open_count_by_sym[s] = open_count_by_sym.get(s, 0) + 1
 
+    # Global circuit-breaker flag lives on the master portfolio.
+    master_cb = bool(int(master["is_circuit_breaker_active"])) if master else False
+
     cards: List[Dict[str, Any]] = []
     for symbol, meta in markets_meta.items():
         pf = by_symbol.get(symbol)
-        initial_balance = float(pf["initial_balance"]) if pf else 833.33
-        cash_balance = float(pf["current_balance"]) if pf else initial_balance
-        open_value = open_value_by_sym.get(symbol, 0.0)
-        equity = cash_balance + open_value
-
         realized_pnl = float(pf["total_pnl"]) if pf else 0.0
         unrealized_pnl = unrealized_by_sym.get(symbol, 0.0)
         total_pnl = realized_pnl + unrealized_pnl
         total_trades = int(pf["total_trades"]) if pf else 0
-        max_dd = float(pf["max_drawdown"]) if pf else 0.0
-        circuit_breaker = bool(int(pf["is_circuit_breaker_active"])) if pf else False
-        pnl_pct = (total_pnl / initial_balance * 100.0) if initial_balance > 0 else 0.0
+        open_value = open_value_by_sym.get(symbol, 0.0)
+
+        # "current_balance" on a card == per-market equity contribution:
+        # realised P&L + unrealised P&L + currently-allocated capital.
+        equity_contribution = total_pnl + open_value
+
+        # Reference baseline for % P&L: use master initial balance when present,
+        # otherwise fall back to 0 to avoid division weirdness.
+        master_initial = float(master["initial_balance"]) if master else 0.0
+        pnl_pct = (total_pnl / master_initial * 100.0) if master_initial > 0 else 0.0
 
         sparkline = _query_snapshots_for_sparkline(db_path, symbol, limit=50)
         if not sparkline:
-            sparkline = [initial_balance]
+            sparkline = [0.0]
 
         latest_signal = _query_latest_signal(db_path, symbol)
 
@@ -589,16 +731,16 @@ def build_market_grid(db_path: str) -> List[Dict[str, Any]]:
                 "symbol": symbol,
                 "display_name": meta.get("display_name", symbol),
                 "category": meta.get("category", "unknown"),
-                "current_balance": equity,
-                "initial_balance": initial_balance,
+                "current_balance": equity_contribution,
+                "initial_balance": 0.0,
                 "total_pnl": total_pnl,
                 "realized_pnl": realized_pnl,
                 "unrealized_pnl": unrealized_pnl,
                 "pnl_pct": pnl_pct,
                 "total_trades": total_trades,
                 "open_positions": open_count_by_sym.get(symbol, 0),
-                "max_drawdown_pct": max_dd * 100.0,
-                "circuit_breaker": circuit_breaker,
+                "max_drawdown_pct": 0.0,
+                "circuit_breaker": master_cb,
                 "sparkline": sparkline,
                 "tv_symbol": TRADINGVIEW_SYMBOLS.get(symbol, symbol),
                 "latest_signal": latest_signal,
@@ -775,11 +917,20 @@ def build_backtest_summary(backtest_dir: str) -> List[Dict[str, Any]]:
 def create_app(
     db_path: Optional[str] = None,
     backtest_dir: Optional[str] = None,
+    *,
+    enable_price_feed: Optional[bool] = None,
+    socketio_async_mode: Optional[str] = None,
 ) -> Flask:
     """Create the dashboard Flask application.
 
     ``db_path`` and ``backtest_dir`` are captured in closures so tests can
     point the app at a temp DB without monkeypatching module-level state.
+
+    When ``flask-socketio`` is available the app also exposes a socket.io
+    server that streams live price updates. ``enable_price_feed`` controls
+    whether the background Binance WS + yfinance poller is started
+    (defaults to True in production, off when ``TESTING`` or when SocketIO
+    is unavailable). Access the SocketIO instance via ``app.extensions['socketio']``.
     """
     app = Flask(
         __name__,
@@ -789,6 +940,52 @@ def create_app(
     app.config["DB_PATH"] = db_path or DEFAULT_DB_PATH
     app.config["BACKTEST_DIR"] = backtest_dir or DEFAULT_BACKTEST_DIR
     app.config["STARTED_AT"] = datetime.utcnow().isoformat()
+
+    socketio = None
+    price_feed: Optional[PriceFeed] = None
+    if SocketIO is not None:
+        socketio = SocketIO(
+            app,
+            cors_allowed_origins="*",
+            async_mode=socketio_async_mode or os.environ.get("SOCKETIO_ASYNC_MODE", "threading"),
+            logger=False,
+            engineio_logger=False,
+        )
+        app.extensions["socketio"] = socketio
+
+        @socketio.on("connect")
+        def _on_connect():  # pragma: no cover — exercised via integration
+            if price_feed is not None:
+                snapshot = price_feed.get_prices()
+                if snapshot:
+                    socketio.emit(
+                        "price_snapshot",
+                        {"prices": snapshot, "connected": price_feed.is_ws_connected()},
+                    )
+
+    should_start_feed = enable_price_feed
+    if should_start_feed is None:
+        should_start_feed = (
+            socketio is not None
+            and os.environ.get("DASHBOARD_DISABLE_PRICE_FEED") != "1"
+            and not app.config.get("TESTING")
+        )
+
+    if should_start_feed and socketio is not None:
+        markets_meta = _load_markets_meta()
+
+        def _emit(symbol: str, price: float) -> None:
+            try:
+                socketio.emit(
+                    "price_update",
+                    {"symbol": symbol, "price": price, "ts": time.time()},
+                )
+            except Exception:
+                logger.exception("socketio emit failed")
+
+        price_feed = PriceFeed(list(markets_meta.keys()), on_update=_emit)
+        app.extensions["price_feed"] = price_feed
+        price_feed.start()
 
     @app.route("/")
     def index():
@@ -811,6 +1008,11 @@ def create_app(
     @app.route("/api/markets")
     def api_markets():
         return jsonify(build_market_grid(app.config["DB_PATH"]))
+
+    @app.route("/api/market_categories")
+    def api_market_categories():
+        """Markets grouped by asset class + a top-level "My Positions" block."""
+        return jsonify(build_market_categories(app.config["DB_PATH"]))
 
     @app.route("/api/strategies")
     def api_strategies():
@@ -844,9 +1046,26 @@ def create_app(
     def api_backtests():
         return jsonify(build_backtest_summary(app.config["BACKTEST_DIR"]))
 
+    @app.route("/api/prices")
+    def api_prices():
+        """Snapshot of the latest live prices (REST fallback when WS is down)."""
+        feed = app.extensions.get("price_feed")
+        if feed is None:
+            return jsonify({"prices": {}, "ws_connected": False})
+        return jsonify({
+            "prices": feed.get_prices(),
+            "ws_connected": feed.is_ws_connected(),
+        })
+
     @app.route("/health")
     def health():
-        return jsonify({"status": "ok", "db_exists": Path(app.config["DB_PATH"]).exists()})
+        feed = app.extensions.get("price_feed")
+        return jsonify({
+            "status": "ok",
+            "db_exists": Path(app.config["DB_PATH"]).exists(),
+            "ws_connected": bool(feed and feed.is_ws_connected()),
+            "realtime_prices": bool(feed and feed.get_prices()),
+        })
 
     @app.route("/api/sync", methods=["POST"])
     def api_sync():
@@ -881,10 +1100,16 @@ def main():
 
     app = create_app()
     logger.info("QuantAgent Dashboard starting on http://127.0.0.1:5001")
-    app.run(host="127.0.0.1", port=5001, debug=False)
+    socketio = app.extensions.get("socketio")
+    if socketio is not None:
+        socketio.run(app, host="127.0.0.1", port=5001, debug=False, allow_unsafe_werkzeug=True)
+    else:
+        app.run(host="127.0.0.1", port=5001, debug=False)
 
 
-# Module-level app instance for gunicorn (gunicorn dashboard:app)
+# Module-level app instance for gunicorn (``gunicorn dashboard:app``).
+# When flask-socketio is installed, run with an eventlet/gevent worker:
+#   gunicorn --worker-class eventlet -w 1 dashboard:app
 app = create_app()
 
 if __name__ == "__main__":

@@ -147,3 +147,76 @@ def test_run_scan_cycle_marks_open_positions_to_market(tmp_db_path, patched_fetc
     # The scanner surfaces the summary fields it got back.
     assert "unrealized_pnl" in result
     assert result["positions_marked"] == 1
+
+
+def test_trend_filter_blocks_short_in_uptrend(tmp_db_path):
+    """execute_signals should skip SHORT signals when regime is trending_up."""
+    from strategies import Signal
+    from market_config import StrategyType
+
+    scanner = MarketScanner(db_path=tmp_db_path)
+    signal = Signal(
+        direction="SHORT", strength=0.9, strategy=StrategyType.MOMENTUM,
+        symbol="BTC-USD", timeframe="4h",
+        entry_price=100.0, stop_loss=105.0, take_profit=80.0,
+        risk_reward_ratio=2.0, reasoning="test",
+        metadata={"regime": "trending_up"},
+    )
+    ids = scanner.execute_signals([signal])
+    assert ids == []
+
+
+def test_trend_filter_blocks_long_in_downtrend(tmp_db_path):
+    """execute_signals should skip LONG signals when regime is trending_down."""
+    from strategies import Signal
+    from market_config import StrategyType
+
+    scanner = MarketScanner(db_path=tmp_db_path)
+    signal = Signal(
+        direction="LONG", strength=0.9, strategy=StrategyType.MOMENTUM,
+        symbol="BTC-USD", timeframe="4h",
+        entry_price=100.0, stop_loss=95.0, take_profit=120.0,
+        risk_reward_ratio=2.0, reasoning="test",
+        metadata={"regime": "trending_down"},
+    )
+    ids = scanner.execute_signals([signal])
+    assert ids == []
+
+
+def test_trend_filter_allows_short_in_downtrend(tmp_db_path):
+    """SHORT in a trending_down market should be allowed (with-trend trade)."""
+    from strategies import Signal
+    from market_config import StrategyType
+
+    scanner = MarketScanner(db_path=tmp_db_path)
+    signal = Signal(
+        direction="SHORT", strength=0.9, strategy=StrategyType.MOMENTUM,
+        symbol="BTC-USD", timeframe="4h",
+        entry_price=100.0, stop_loss=105.0, take_profit=80.0,
+        risk_reward_ratio=2.0, reasoning="test",
+        metadata={"regime": "trending_down"},
+    )
+    ids = scanner.execute_signals([signal])
+    # Should attempt execution (may or may not fill depending on sizing,
+    # but it should NOT be filtered out by the trend filter).
+    # We check it got past the filter by verifying it's not empty OR
+    # that the engine was called (not filtered).
+    # Since the signal has valid params, it should execute.
+    assert len(ids) >= 1
+
+
+def test_trend_filter_allows_ranging_regime(tmp_db_path):
+    """Ranging regime should not filter any direction."""
+    from strategies import Signal
+    from market_config import StrategyType
+
+    scanner = MarketScanner(db_path=tmp_db_path)
+    signal = Signal(
+        direction="SHORT", strength=0.9, strategy=StrategyType.MOMENTUM,
+        symbol="BTC-USD", timeframe="4h",
+        entry_price=100.0, stop_loss=105.0, take_profit=80.0,
+        risk_reward_ratio=2.0, reasoning="test",
+        metadata={"regime": "ranging"},
+    )
+    ids = scanner.execute_signals([signal])
+    assert len(ids) >= 1

@@ -567,3 +567,73 @@ def test_stacking_guard_blocks_across_open_and_recent_closed(tmp_db_path):
     # No open positions but the closed trade is within cooldown → blocked.
     assert engine.get_open_positions("BTC-USD") == []
     assert engine.execute_trade(_mk_signal(), _mk_pos(size=500, qty=5)) is None
+
+
+# ─────────── Per-symbol circuit breaker (consecutive losses) ───────────
+
+
+def test_symbol_circuit_breaker_triggers_after_n_consecutive_stops(tmp_db_path):
+    """After SYMBOL_CB_MAX_CONSECUTIVE_LOSSES stop-losses on one symbol,
+    further entries are blocked even after the normal cooldown expires."""
+    engine = PaperTradingEngine(db_path=tmp_db_path)
+    engine.COOLDOWN_MINUTES = 0  # disable normal cooldown
+    engine.SYMBOL_CB_MAX_CONSECUTIVE_LOSSES = 3
+    engine.SYMBOL_CB_COOLDOWN_MINUTES = 120
+
+    # Open and stop out 3 trades on BTC-USD
+    for _ in range(3):
+        tid = engine.execute_trade(
+            _mk_signal(entry=100, stop=95, tp=110),
+            _mk_pos(size=200, qty=2, stop=95, tp=110),
+        )
+        assert tid is not None
+        engine.close_trade(tid, exit_price=95, reason="stop_loss")
+
+    # 4th trade should be blocked by circuit breaker
+    blocked = engine.execute_trade(
+        _mk_signal(entry=100, stop=95, tp=110),
+        _mk_pos(size=200, qty=2, stop=95, tp=110),
+    )
+    assert blocked is None
+
+
+def test_symbol_circuit_breaker_does_not_trigger_on_wins(tmp_db_path):
+    """A winning close resets the consecutive-loss pattern."""
+    engine = PaperTradingEngine(db_path=tmp_db_path)
+    engine.COOLDOWN_MINUTES = 0
+    engine.SYMBOL_CB_MAX_CONSECUTIVE_LOSSES = 3
+    engine.SYMBOL_CB_COOLDOWN_MINUTES = 120
+
+    # Stop, stop, WIN, stop — should NOT trigger CB (only 1 consecutive loss)
+    t1 = engine.execute_trade(_mk_signal(), _mk_pos(size=200, qty=2))
+    engine.close_trade(t1, exit_price=95, reason="stop_loss")
+    t2 = engine.execute_trade(_mk_signal(), _mk_pos(size=200, qty=2))
+    engine.close_trade(t2, exit_price=95, reason="stop_loss")
+    t3 = engine.execute_trade(_mk_signal(), _mk_pos(size=200, qty=2))
+    engine.close_trade(t3, exit_price=110)  # WIN
+    t4 = engine.execute_trade(_mk_signal(), _mk_pos(size=200, qty=2))
+    engine.close_trade(t4, exit_price=95, reason="stop_loss")
+
+    # Should still be allowed — only 1 consecutive loss after the win
+    t5 = engine.execute_trade(_mk_signal(), _mk_pos(size=200, qty=2))
+    assert t5 is not None
+
+
+def test_symbol_circuit_breaker_scoped_to_symbol(tmp_db_path):
+    """CB on BTC-USD should not block ETH-USD."""
+    engine = PaperTradingEngine(db_path=tmp_db_path)
+    engine.COOLDOWN_MINUTES = 0
+    engine.SYMBOL_CB_MAX_CONSECUTIVE_LOSSES = 2
+    engine.SYMBOL_CB_COOLDOWN_MINUTES = 120
+
+    for _ in range(2):
+        tid = engine.execute_trade(
+            _mk_signal(symbol="BTC-USD"),
+            _mk_pos(size=200, qty=2),
+        )
+        engine.close_trade(tid, exit_price=95, reason="stop_loss")
+
+    # BTC blocked
+    assert engine.execute_trade(_mk_signal(symbol="BTC-USD"), _mk_pos(size=200, qty=2)) is None
+    # ETH still open
+    assert engine.execute_trade(_mk_signal(symbol="ETH-USD"), _mk_pos(size=200, qty=2)) is not None

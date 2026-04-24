@@ -54,6 +54,12 @@ class PaperTradingEngine:
     # priced tokens (which would disable stop/tp entirely since price >= 0).
     MIN_PRICE = 1e-8
 
+    # Per-symbol circuit breaker: after N consecutive stop-losses on a single
+    # symbol, pause that symbol for SYMBOL_CB_COOLDOWN_MINUTES. Prevents the
+    # bot from repeatedly shorting into a rally (INJ-USD problem).
+    SYMBOL_CB_MAX_CONSECUTIVE_LOSSES = 3
+    SYMBOL_CB_COOLDOWN_MINUTES = 120  # 2 hours
+
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path
         self.risk_manager = RiskManager()
@@ -155,9 +161,11 @@ class PaperTradingEngine:
 
     def _recent_or_open_trade(self, symbol: str) -> bool:
         """True if ``symbol`` has an OPEN trade OR a trade closed within the
-        cooldown window. Logs the reason so callers don't need to.
+        cooldown window OR the per-symbol circuit breaker is active.
+        Logs the reason so callers don't need to.
         """
         cutoff = (datetime.utcnow() - timedelta(minutes=self.COOLDOWN_MINUTES)).isoformat()
+        cb_cutoff = (datetime.utcnow() - timedelta(minutes=self.SYMBOL_CB_COOLDOWN_MINUTES)).isoformat()
         with get_connection(self.db_path) as conn:
             open_row = conn.execute(
                 "SELECT id FROM trades WHERE symbol = ? AND status = 'OPEN' LIMIT 1",
@@ -168,6 +176,26 @@ class PaperTradingEngine:
                     f"Position stacking blocked: {symbol} already has an open trade."
                 )
                 return True
+
+            # Per-symbol circuit breaker: count consecutive recent stop-losses.
+            if self.SYMBOL_CB_MAX_CONSECUTIVE_LOSSES > 0:
+                recent_trades = conn.execute(
+                    """SELECT status FROM trades
+                       WHERE symbol = ? AND status != 'OPEN'
+                         AND exit_time IS NOT NULL AND exit_time >= ?
+                       ORDER BY exit_time DESC LIMIT ?""",
+                    (symbol, cb_cutoff, self.SYMBOL_CB_MAX_CONSECUTIVE_LOSSES)
+                ).fetchall()
+                if len(recent_trades) >= self.SYMBOL_CB_MAX_CONSECUTIVE_LOSSES:
+                    all_stopped = all(r["status"] == "STOPPED" for r in recent_trades)
+                    if all_stopped:
+                        logger.warning(
+                            f"Symbol circuit breaker: {symbol} has "
+                            f"{len(recent_trades)} consecutive stop-losses in the "
+                            f"last {self.SYMBOL_CB_COOLDOWN_MINUTES}min — paused."
+                        )
+                        return True
+
             if self.COOLDOWN_MINUTES <= 0:
                 return False
             recent = conn.execute(

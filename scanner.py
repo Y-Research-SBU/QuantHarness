@@ -365,13 +365,29 @@ class MarketScanner:
                     pass
             return base * float(weight)
 
-        # Drop disabled strategies up-front (L1).
+        # Drop disabled strategies up-front (L1) + trend-conflict filter.
         filtered: List[Signal] = []
         for s in signals:
             strat = s.strategy.value if hasattr(s.strategy, "value") else str(s.strategy)
             if strategy_weights.get(strat, 1.0) == WEIGHT_DISABLED:
                 logger.debug("Skipping disabled strategy signal: %s %s", strat, s.symbol)
                 continue
+
+            # Trend-conflict filter: never SHORT a trending-up market or
+            # LONG a trending-down market. These counter-trend trades have
+            # a terrible hit rate (the INJ-USD problem).
+            regime = (s.metadata or {}).get("regime") if isinstance(s.metadata, dict) else None
+            if regime == "trending_up" and s.direction == "SHORT":
+                logger.info(
+                    "Trend filter: skipping SHORT %s — regime is trending_up", s.symbol
+                )
+                continue
+            if regime == "trending_down" and s.direction == "LONG":
+                logger.info(
+                    "Trend filter: skipping LONG %s — regime is trending_down", s.symbol
+                )
+                continue
+
             filtered.append(s)
 
         # Rank by weighted strength, strongest first.

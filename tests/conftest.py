@@ -134,3 +134,107 @@ def oversold_ohlcv() -> pd.DataFrame:
     df.attrs["symbol"] = "OS-USD"
     df.attrs["timeframe"] = "1h"
     return df
+
+
+# ─────────────────────────────────────────────────────────────
+# Trading-engine fixtures used by integration/regression/E2E tests
+# ─────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def engine(tmp_db_path):
+    """Fresh PaperTradingEngine on an isolated temp SQLite database."""
+    from paper_trading import PaperTradingEngine
+    return PaperTradingEngine(db_path=tmp_db_path)
+
+
+@pytest.fixture
+def make_signal():
+    """Factory for Signal objects with sensible defaults."""
+    from market_config import StrategyType
+    from strategies import Signal
+
+    def _make(
+        symbol: str = "BTC-USD",
+        direction: str = "LONG",
+        entry: float = 100.0,
+        stop: float = 95.0,
+        tp: float = 115.0,
+        timeframe: str = "1h",
+        strategy: StrategyType = StrategyType.MOMENTUM,
+        strength: float = 0.8,
+    ) -> Signal:
+        return Signal(
+            direction=direction,
+            strength=strength,
+            strategy=strategy,
+            symbol=symbol,
+            timeframe=timeframe,
+            entry_price=entry,
+            stop_loss=stop,
+            take_profit=tp,
+            risk_reward_ratio=2.0,
+            reasoning="test signal",
+            metadata={},
+        )
+
+    return _make
+
+
+@pytest.fixture
+def make_position():
+    """Factory for PositionSizeResult with sensible defaults."""
+    from position_sizing import PositionSizeResult
+
+    def _make(
+        size: float = 1000.0,
+        qty: float = 10.0,
+        stop: float = 95.0,
+        tp: float = 115.0,
+    ) -> PositionSizeResult:
+        return PositionSizeResult(
+            position_size_usd=size,
+            quantity=qty,
+            risk_per_trade_usd=size * 0.02,
+            risk_pct=0.02,
+            kelly_fraction=0.2,
+            half_kelly=0.1,
+            stop_loss=stop,
+            take_profit=tp,
+            reason="test position",
+        )
+
+    return _make
+
+
+@pytest.fixture
+def open_trade(engine, make_signal, make_position):
+    """Open a single BTC-USD LONG trade and return (trade_id, engine)."""
+    signal = make_signal()
+    position = make_position()
+    trade_id = engine.execute_trade(signal, position)
+    assert trade_id is not None
+    return trade_id, engine
+
+
+@pytest.fixture
+def dashboard_app(tmp_db_path, tmp_path):
+    """Flask test client for the dashboard pointed at a temp DB + backtest dir.
+
+    The DB schema is initialized so the dashboard can query empty tables
+    without raising OperationalError.
+    """
+    import dashboard
+    from db_schema import init_db
+    init_db(tmp_db_path)
+
+    backtest_dir = tmp_path / "backtest_results"
+    backtest_dir.mkdir()
+    app = dashboard.create_app(db_path=tmp_db_path, backtest_dir=str(backtest_dir))
+    app.config["TESTING"] = True
+    return app
+
+
+@pytest.fixture
+def dashboard_client(dashboard_app):
+    return dashboard_app.test_client()

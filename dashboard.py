@@ -28,6 +28,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import pandas as pd
 from flask import Flask, jsonify, render_template, request as flask_request, send_from_directory
 
 
@@ -282,11 +283,61 @@ def _query_scanner_status(db_path: str) -> Dict[str, Any]:
 # ───────────────────────── Aggregation helpers ─────────────────────────
 
 
+def _fetch_current_prices(symbols: List[str]) -> Dict[str, float]:
+    """Fetch current market prices via yfinance. Returns {symbol: price}.
+    
+    Falls back gracefully — returns empty dict if yfinance unavailable.
+    Results are cached for 60s to avoid hammering the API.
+    """
+    try:
+        import yfinance as yf
+    except ImportError:
+        return {}
+    
+    prices: Dict[str, float] = {}
+    try:
+        # Batch download — single API call for all symbols
+        data = yf.download(symbols, period="1d", interval="1d", progress=False)
+        if data.empty:
+            return {}
+        close = data["Close"]
+        if isinstance(close, pd.Series):
+            # Single symbol case
+            prices[symbols[0]] = float(close.iloc[-1])
+        else:
+            for sym in symbols:
+                if sym in close.columns:
+                    val = close[sym].dropna()
+                    if not val.empty:
+                        prices[sym] = float(val.iloc[-1])
+    except Exception:
+        pass
+    return prices
+
+
+# Simple in-memory cache for current prices (avoid refetching every 30s AJAX poll)
+_price_cache: Dict[str, Any] = {"prices": {}, "fetched_at": 0.0}
+_PRICE_CACHE_TTL = 120  # seconds
+
+
+def _get_cached_prices(symbols: List[str]) -> Dict[str, float]:
+    """Return current prices, using a 2-minute cache."""
+    import time
+    now = time.time()
+    if now - _price_cache["fetched_at"] < _PRICE_CACHE_TTL and _price_cache["prices"]:
+        return _price_cache["prices"]
+    prices = _fetch_current_prices(symbols)
+    if prices:
+        _price_cache["prices"] = prices
+        _price_cache["fetched_at"] = now
+    return prices
+
+
 def _compute_unrealized_pnl(db_path: str) -> Dict[str, float]:
     """Compute unrealized P&L per symbol from open trades.
 
-    Compares entry price to the most recent close price available in
-    portfolio_snapshots or trade data.  Returns {symbol: unrealized_pnl}.
+    Fetches current market prices and compares to entry prices.
+    Returns {symbol: unrealized_pnl}.
     """
     if not Path(db_path).exists():
         return {}
@@ -299,32 +350,33 @@ def _compute_unrealized_pnl(db_path: str) -> Dict[str, float]:
     for t in open_trades:
         by_symbol.setdefault(t["symbol"], []).append(t)
 
-    # Try to get current prices from the most recent snapshot or trade exit
+    # Fetch current prices for all symbols with open positions
+    symbols = list(by_symbol.keys())
+    current_prices = _get_cached_prices(symbols)
+
     unrealized: Dict[str, float] = {}
     with _connect(db_path) as conn:
         for symbol, trades in by_symbol.items():
-            # Best effort: use latest snapshot balance as proxy, or
-            # use the entry price itself (showing $0 unrealized) if no data.
-            # In practice the scanner writes snapshots every cycle.
-            latest_price_row = conn.execute(
-                "SELECT exit_price FROM trades WHERE symbol = ? AND exit_price IS NOT NULL "
-                "ORDER BY exit_time DESC LIMIT 1",
-                (symbol,),
-            ).fetchone()
-            if latest_price_row and latest_price_row[0]:
-                current_price = float(latest_price_row[0])
+            # Priority: live price > last exit price > entry price (fallback)
+            if symbol in current_prices:
+                price = current_prices[symbol]
             else:
-                # Fall back to entry price of the most recent trade
-                current_price = float(trades[0].get("entry_price", 0))
+                # Fallback: last closed trade exit price
+                row = conn.execute(
+                    "SELECT exit_price FROM trades WHERE symbol = ? AND exit_price IS NOT NULL "
+                    "ORDER BY exit_time DESC LIMIT 1",
+                    (symbol,),
+                ).fetchone()
+                price = float(row[0]) if row and row[0] else float(trades[0].get("entry_price", 0))
 
             sym_pnl = 0.0
             for t in trades:
                 entry = float(t.get("entry_price", 0))
                 qty = float(t.get("quantity", 0))
                 if t.get("direction") == "LONG":
-                    sym_pnl += (current_price - entry) * qty
+                    sym_pnl += (price - entry) * qty
                 else:
-                    sym_pnl += (entry - current_price) * qty
+                    sym_pnl += (entry - price) * qty
             unrealized[symbol] = sym_pnl
     return unrealized
 

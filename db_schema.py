@@ -4,6 +4,7 @@ Tables: trades, positions, portfolios, portfolio_snapshots, strategy_performance
 """
 
 import logging
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -11,7 +12,24 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DB_PATH = "paper_trades.db"
+
+def _default_db_path() -> str:
+    """Resolve the default DB path, matching ``dashboard.py`` semantics.
+
+    Order: DB_PATH env var → /data/paper_trades.db on Railway → paper_trades.db.
+    Keeping this consistent across writers (scanner) and readers (dashboard)
+    avoids the class of bug where trades land in one file while the dashboard
+    reads from another.
+    """
+    env = os.environ.get("DB_PATH")
+    if env:
+        return env
+    if os.path.isdir("/data"):
+        return "/data/paper_trades.db"
+    return "paper_trades.db"
+
+
+DEFAULT_DB_PATH = _default_db_path()
 
 SCHEMA_SQL = """
 -- Trades table: every trade (entry and exit)
@@ -47,7 +65,8 @@ CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_strategy ON trades(strategy);
 CREATE INDEX IF NOT EXISTS idx_trades_entry_time ON trades(entry_time);
 
--- Portfolios table: one per market
+-- Portfolios table: one MASTER row holds all capital (symbol='__MASTER__'),
+-- per-symbol rows track per-market P&L analytics only (no capital).
 CREATE TABLE IF NOT EXISTS portfolios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     symbol TEXT NOT NULL UNIQUE,
@@ -121,8 +140,12 @@ CREATE INDEX IF NOT EXISTS idx_api_costs_time ON api_costs(created_at);
 
 
 def get_db_path(db_path: Optional[str] = None) -> str:
-    """Get database path, defaulting to DEFAULT_DB_PATH."""
-    return db_path or DEFAULT_DB_PATH
+    """Get database path, defaulting to the env/volume-resolved default.
+
+    Resolved at call time (not at import) so tests and deploys can set
+    ``DB_PATH`` after the module has loaded.
+    """
+    return db_path or _default_db_path()
 
 
 def init_db(db_path: Optional[str] = None) -> sqlite3.Connection:

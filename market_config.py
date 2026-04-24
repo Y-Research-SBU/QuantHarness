@@ -42,12 +42,12 @@ class MarketConfig:
 
 # All supported markets
 _CRYPTO_DEFAULT_STRATEGIES = [
-    StrategyType.MOMENTUM,
+    # StrategyType.MOMENTUM,  # disabled: 17% win rate over 12 trades, sharpe -3.19 (2026-04-24)
     StrategyType.MEAN_REVERSION,
     StrategyType.BREAKOUT,
     StrategyType.MULTI_FACTOR,
     StrategyType.KRONOS_MOMENTUM_CONFIRM,
-    StrategyType.KRONOS_DIVERGENCE,
+    # StrategyType.KRONOS_DIVERGENCE,  # disabled: 0% win rate over 8 trades, sharpe -4.64 (2026-04-24)
     StrategyType.MULTI_TIMEFRAME_KRONOS,
 ]
 
@@ -138,8 +138,7 @@ MARKETS: Dict[str, MarketConfig] = {
     "LDO-USD": _crypto("LDO-USD", "Lido DAO", "crypto_defi"),
     "MKR-USD": _crypto("MKR-USD", "Maker", "crypto_defi"),
     "CRV-USD": _crypto("CRV-USD", "Curve", "crypto_defi"),
-    "GRT-USD": _crypto("GRT-USD", "The Graph", "crypto_ai"),
-    "IMX-USD": _crypto("IMX-USD", "Immutable X", "crypto_l2"),
+    # GRT-USD and IMX-USD removed — delisted per yfinance (2026-04-24)
     "HBAR-USD": _crypto("HBAR-USD", "Hedera", "crypto_l1"),
 
     # ══════════════════════════════════════════════════════════════

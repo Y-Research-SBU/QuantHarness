@@ -180,9 +180,18 @@ class RegimeDetector:
             return "unknown"
 
         # Volatile takes priority: big ranges without clear direction.
+        # BUT if SMA slope is strongly directional (>= 2x threshold), treat
+        # as trending even when volatility is high — prevents contrarian
+        # strategies from shorting clearly rising (or longing clearly falling)
+        # assets that happen to be volatile.
         volatile = atr_pct >= self.VOLATILE_ATR_PCT or bb_width >= self.VOLATILE_BB_WIDTH
-        if volatile and adx < self.TRENDING_ADX:
+        strong_slope = abs(slope) >= self.UPTREND_SLOPE * 2
+        if volatile and adx < self.TRENDING_ADX and not strong_slope:
             return "volatile"
+        if volatile and adx < self.TRENDING_ADX and strong_slope:
+            if slope >= self.UPTREND_SLOPE:
+                return "trending_up"
+            return "trending_down"
 
         if adx >= self.TRENDING_ADX:
             if slope >= self.UPTREND_SLOPE:

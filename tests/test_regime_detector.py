@@ -181,3 +181,45 @@ def test_lowercase_columns_supported():
     detector = RegimeDetector()
     regime = detector.classify(df)
     assert regime in REGIMES
+
+
+def _volatile_trending_up_df(n: int = 200, base: float = 100.0) -> pd.DataFrame:
+    """High volatility (wide ATR/BB) but clear upward slope — should be
+    classified as 'trending_up' not 'volatile' after the strong-slope fix."""
+    rng = np.random.default_rng(42)
+    # Strong upward drift + large noise
+    drift = np.linspace(0, 60, n)
+    noise = rng.normal(0, 3.0, size=n)
+    closes = base + drift + noise
+    # Wide spread to ensure high ATR
+    return _make_df(closes, spread=4.0)
+
+
+def _volatile_trending_down_df(n: int = 200, base: float = 200.0) -> pd.DataFrame:
+    """High volatility but clear downward slope."""
+    rng = np.random.default_rng(42)
+    drift = np.linspace(0, -80, n)  # steeper drop for clear slope signal
+    noise = rng.normal(0, 3.0, size=n)
+    closes = base + drift + noise
+    return _make_df(closes, spread=4.0)
+
+
+def test_volatile_but_strongly_trending_up_is_trending():
+    """When an asset is volatile but has a strong upward SMA slope (>= 2x
+    UPTREND_SLOPE), classify as trending_up to prevent counter-trend shorts."""
+    detector = RegimeDetector()
+    df = _volatile_trending_up_df()
+    regime = detector.classify(df)
+    assert regime == "trending_up", (
+        f"Expected trending_up for volatile asset with strong upward slope, got {regime}"
+    )
+
+
+def test_volatile_but_strongly_trending_down_is_trending():
+    """Same as above but downward."""
+    detector = RegimeDetector()
+    df = _volatile_trending_down_df()
+    regime = detector.classify(df)
+    assert regime == "trending_down", (
+        f"Expected trending_down for volatile asset with strong downward slope, got {regime}"
+    )

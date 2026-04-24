@@ -105,9 +105,9 @@ MARKETS: Dict[str, MarketConfig] = {
 
     # --- Tier 2: AI / DePIN tokens ---
     "FET-USD": _crypto("FET-USD", "Fetch.ai", "crypto_ai"),
-    "RNDR-USD": _crypto("RNDR-USD", "Render", "crypto_ai"),
+    # "RNDR-USD": removed — yfinance reports delisted (2026-04-24)
     "WLD-USD": _crypto("WLD-USD", "Worldcoin", "crypto_ai"),
-    "TAO-USD": _crypto("TAO-USD", "Bittensor", "crypto_ai"),
+    # "TAO-USD": removed — yfinance reports delisted (2026-04-24)
     "AR-USD": _crypto("AR-USD", "Arweave", "crypto_ai"),
 
     # --- Tier 2b: DeFi / Liquid staking ---

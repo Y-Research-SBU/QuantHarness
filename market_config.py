@@ -52,15 +52,21 @@ _CRYPTO_DEFAULT_STRATEGIES = [
 ]
 
 
+# Crypto markets fan out across short and long horizons. The intraday
+# timeframes (5m/15m) give the self-improvement loop 10–50× more closed
+# trades per day; the higher timeframes still anchor longer-trend signals.
+_CRYPTO_TIMEFRAMES = ["1d", "4h", "1h", "15m", "5m"]
+
+
 def _crypto(symbol: str, display_name: str, group: str = "crypto_major") -> MarketConfig:
     """Helper to create a crypto market config with standard settings."""
     return MarketConfig(
         symbol=symbol,
         display_name=display_name,
         category=MarketCategory.CRYPTO,
-        timeframes=["4h", "1h"],
+        timeframes=list(_CRYPTO_TIMEFRAMES),
         enabled_strategies=list(_CRYPTO_DEFAULT_STRATEGIES),
-        scan_interval_hours=4.0,
+        scan_interval_hours=0.0,
         correlation_group=group,
     )
 

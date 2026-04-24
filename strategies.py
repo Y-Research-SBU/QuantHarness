@@ -22,6 +22,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from adaptive_params import get_timeframe_defaults
 from market_config import StrategyType
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,23 @@ def _get_shared_kronos_agent():
         from kronos_agent import KronosForecastAgent  # local import to avoid heavy import at module load
         _SHARED_KRONOS_AGENT = KronosForecastAgent()
     return _SHARED_KRONOS_AGENT
+
+
+def _resolve_params(
+    adaptive_params: Optional[Dict[str, float]],
+    timeframe: Optional[str],
+) -> Dict[str, float]:
+    """Merge timeframe-aware defaults with caller-supplied adaptive params.
+
+    Adaptive (per-strategy/per-symbol tuned) values win over timeframe defaults
+    so the self-improver's L2 output always takes precedence once it has data.
+    """
+    merged = get_timeframe_defaults(timeframe)
+    if adaptive_params:
+        for k, v in adaptive_params.items():
+            if v is not None:
+                merged[k] = v
+    return merged
 
 
 def _extract_kronos_forecast(agent_reports: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -294,9 +312,10 @@ class MomentumStrategy(BaseStrategy):
         sma_50 = indicators.get("sma_50", current_price)
         atr = indicators.get("atr", current_price * 0.02)
 
-        # L2: allow self-improver to tune SL/TP ATR multipliers.
-        sl_mult = float((adaptive_params or {}).get("sl_atr_mult", 2.0))
-        tp_mult = float((adaptive_params or {}).get("tp_atr_mult", 3.0))
+        # L2: timeframe-aware defaults overlaid with self-improver params.
+        params = _resolve_params(adaptive_params, df.attrs.get("timeframe"))
+        sl_mult = float(params["sl_atr_mult"])
+        tp_mult = float(params["tp_atr_mult"])
 
         # Trend direction: price above both SMAs = uptrend
         uptrend = current_price > sma_20 and sma_20 > sma_50
@@ -385,11 +404,11 @@ class MeanReversionStrategy(BaseStrategy):
         atr = indicators.get("atr", current_price * 0.02)
         sma_20 = indicators.get("sma_20", current_price)
 
-        # L2: allow self-improver to tune RSI thresholds + SL distance.
-        params = adaptive_params or {}
+        # L2: timeframe-aware defaults overlaid with self-improver params.
+        params = _resolve_params(adaptive_params, df.attrs.get("timeframe"))
         overbought = float(params.get("rsi_overbought", self.RSI_OVERBOUGHT))
         oversold = float(params.get("rsi_oversold", self.RSI_OVERSOLD))
-        sl_mult = float(params.get("sl_atr_mult", 1.5))
+        sl_mult = float(params["sl_atr_mult"])
 
         # Overbought → SHORT
         if rsi > overbought and stoch_k > 80:
@@ -466,7 +485,11 @@ class BreakoutStrategy(BaseStrategy):
         current_price = float(close[-1])
 
         atr = indicators.get("atr", current_price * 0.02)
-        
+
+        # L2: timeframe-aware SL distance for the breakout buffer.
+        params = _resolve_params(adaptive_params, df.attrs.get("timeframe"))
+        sl_mult = float(params["sl_atr_mult"])
+
         # Detect consolidation: recent range is narrow
         lookback = 20
         recent_high = np.max(high[-lookback:])
@@ -498,7 +521,7 @@ class BreakoutStrategy(BaseStrategy):
             pattern_bearish = any(p in report for p in bearish_patterns)
         
         if (breakout_up or pattern_bullish) and (volume_confirmed or pattern_bullish):
-            stop_loss = recent_low - 0.5 * atr
+            stop_loss = recent_low - 0.5 * sl_mult * atr
             take_profit = current_price + (current_price - stop_loss) * 1.5
             rr = (take_profit - current_price) / (current_price - stop_loss) if current_price > stop_loss else 1.5
             
@@ -524,7 +547,7 @@ class BreakoutStrategy(BaseStrategy):
             )
         
         elif (breakout_down or pattern_bearish) and (volume_confirmed or pattern_bearish):
-            stop_loss = recent_high + 0.5 * atr
+            stop_loss = recent_high + 0.5 * sl_mult * atr
             take_profit = current_price - (stop_loss - current_price) * 1.5
             rr = (current_price - take_profit) / (stop_loss - current_price) if stop_loss > current_price else 1.5
             
@@ -577,7 +600,12 @@ class MultiFactorStrategy(BaseStrategy):
         close = df["Close"].values
         current_price = float(close[-1])
         atr = indicators.get("atr", current_price * 0.02)
-        
+
+        # L2: timeframe-aware SL/TP multipliers for the breakout-style stop.
+        params = _resolve_params(adaptive_params, df.attrs.get("timeframe"))
+        sl_mult = float(params["sl_atr_mult"])
+        tp_mult = float(params["tp_atr_mult"])
+
         # Score from 5 factors
         scores = []
         reasons = []
@@ -667,8 +695,8 @@ class MultiFactorStrategy(BaseStrategy):
         total_signals = len(scores)
         
         if bullish_count >= self.AGREEMENT_THRESHOLD:
-            stop_loss = current_price - 2 * atr
-            take_profit = current_price + 3 * atr
+            stop_loss = current_price - sl_mult * atr
+            take_profit = current_price + tp_mult * atr
             rr = (take_profit - current_price) / (current_price - stop_loss) if current_price > stop_loss else 1.5
             
             return Signal(
@@ -686,8 +714,8 @@ class MultiFactorStrategy(BaseStrategy):
             )
         
         elif bearish_count >= self.AGREEMENT_THRESHOLD:
-            stop_loss = current_price + 2 * atr
-            take_profit = current_price - 3 * atr
+            stop_loss = current_price + sl_mult * atr
+            take_profit = current_price - tp_mult * atr
             rr = (current_price - take_profit) / (stop_loss - current_price) if stop_loss > current_price else 1.5
             
             return Signal(
@@ -816,8 +844,11 @@ class KronosMomentumConfirmStrategy(BaseStrategy):
 
         magnitude = float(forecast.get("magnitude_pct", 0.0))
         confidence = float(forecast.get("confidence", 0.0))
-        # L2: tuned confidence floor overrides the constructor default.
-        min_conf = float((adaptive_params or {}).get("kronos_min_confidence", self.min_confidence))
+        # L2: timeframe-aware defaults overlaid with self-improver params.
+        params = _resolve_params(adaptive_params, df.attrs.get("timeframe"))
+        min_conf = float(params.get("kronos_min_confidence", self.min_confidence))
+        sl_mult = float(params["sl_atr_mult"])
+        tp_mult = float(params["tp_atr_mult"])
         if confidence < min_conf:
             return None
 
@@ -829,8 +860,8 @@ class KronosMomentumConfirmStrategy(BaseStrategy):
 
         # LONG conditions
         if magnitude >= self.min_pct and rsi < self.rsi_max and sentiment != "bearish":
-            stop_loss = current_price - 2 * atr
-            take_profit = current_price + max(2 * atr, current_price * magnitude / 100.0)
+            stop_loss = current_price - sl_mult * atr
+            take_profit = current_price + max(tp_mult * atr, current_price * magnitude / 100.0)
             rr = (take_profit - current_price) / max(current_price - stop_loss, 1e-9)
             strength = float(np.clip(0.5 * confidence + 0.5 * min(1.0, magnitude / 5.0), 0.0, 1.0))
             return Signal(
@@ -852,8 +883,8 @@ class KronosMomentumConfirmStrategy(BaseStrategy):
 
         # SHORT conditions
         if magnitude <= -self.min_pct and rsi > self.rsi_min and sentiment != "bullish":
-            stop_loss = current_price + 2 * atr
-            take_profit = current_price - max(2 * atr, current_price * abs(magnitude) / 100.0)
+            stop_loss = current_price + sl_mult * atr
+            take_profit = current_price - max(tp_mult * atr, current_price * abs(magnitude) / 100.0)
             rr = (current_price - take_profit) / max(stop_loss - current_price, 1e-9)
             strength = float(
                 np.clip(0.5 * confidence + 0.5 * min(1.0, abs(magnitude) / 5.0), 0.0, 1.0)
@@ -935,7 +966,10 @@ class KronosDivergenceStrategy(BaseStrategy):
 
         confidence = float(forecast.get("confidence", 0.0))
         magnitude = float(forecast.get("magnitude_pct", 0.0))
-        min_conf = float((adaptive_params or {}).get("kronos_min_confidence", self.min_confidence))
+        params = _resolve_params(adaptive_params, df.attrs.get("timeframe"))
+        min_conf = float(params.get("kronos_min_confidence", self.min_confidence))
+        sl_mult = float(params["sl_atr_mult"])
+        tp_mult = float(params["tp_atr_mult"])
         if confidence < min_conf:
             return None
 
@@ -950,10 +984,10 @@ class KronosDivergenceStrategy(BaseStrategy):
 
         # Bullish trend but Kronos says DOWN → contrarian SHORT
         if uptrend and magnitude <= -self.min_pct:
-            stop_loss = current_price + 1.5 * atr
-            take_profit = max(sma_20, current_price - max(2 * atr, abs(magnitude) / 100.0 * current_price))
+            stop_loss = current_price + sl_mult * atr
+            take_profit = max(sma_20, current_price - max(tp_mult * atr, abs(magnitude) / 100.0 * current_price))
             if take_profit >= current_price:
-                take_profit = current_price - 2 * atr
+                take_profit = current_price - tp_mult * atr
             rr = (current_price - take_profit) / max(stop_loss - current_price, 1e-9)
             strength = float(np.clip(0.4 + 0.6 * confidence, 0.0, 1.0))
             return Signal(
@@ -975,10 +1009,10 @@ class KronosDivergenceStrategy(BaseStrategy):
 
         # Bearish trend but Kronos says UP → contrarian LONG
         if downtrend and magnitude >= self.min_pct:
-            stop_loss = current_price - 1.5 * atr
-            take_profit = min(sma_20, current_price + max(2 * atr, magnitude / 100.0 * current_price))
+            stop_loss = current_price - sl_mult * atr
+            take_profit = min(sma_20, current_price + max(tp_mult * atr, magnitude / 100.0 * current_price))
             if take_profit <= current_price:
-                take_profit = current_price + 2 * atr
+                take_profit = current_price + tp_mult * atr
             rr = (take_profit - current_price) / max(current_price - stop_loss, 1e-9)
             strength = float(np.clip(0.4 + 0.6 * confidence, 0.0, 1.0))
             return Signal(
@@ -1071,7 +1105,10 @@ class MultiTimeframeKronosStrategy(BaseStrategy):
         directions = [self._direction_from_pct(float(f.get("magnitude_pct", 0.0)), self.min_pct) for f in forecasts]
         confidences = [float(f.get("confidence", 0.0)) for f in forecasts]
 
-        min_conf = float((adaptive_params or {}).get("kronos_min_confidence", self.min_confidence))
+        params = _resolve_params(adaptive_params, df.attrs.get("timeframe"))
+        min_conf = float(params.get("kronos_min_confidence", self.min_confidence))
+        sl_mult = float(params["sl_atr_mult"])
+        tp_mult = float(params["tp_atr_mult"])
         if any(c < min_conf for c in confidences):
             return None
 
@@ -1091,12 +1128,12 @@ class MultiTimeframeKronosStrategy(BaseStrategy):
         strength = float(np.clip(0.5 * avg_confidence + 0.5 * min(1.0, avg_magnitude / 5.0), 0.0, 1.0))
 
         if agreed_direction == "LONG":
-            stop_loss = current_price - 2 * atr
-            take_profit = current_price + max(3 * atr, current_price * avg_magnitude / 100.0)
+            stop_loss = current_price - sl_mult * atr
+            take_profit = current_price + max(tp_mult * atr, current_price * avg_magnitude / 100.0)
             rr = (take_profit - current_price) / max(current_price - stop_loss, 1e-9)
         else:
-            stop_loss = current_price + 2 * atr
-            take_profit = current_price - max(3 * atr, current_price * avg_magnitude / 100.0)
+            stop_loss = current_price + sl_mult * atr
+            take_profit = current_price - max(tp_mult * atr, current_price * avg_magnitude / 100.0)
             rr = (current_price - take_profit) / max(stop_loss - current_price, 1e-9)
 
         return Signal(

@@ -38,6 +38,29 @@ DEFAULT_PARAMS: Dict[str, float] = {
 }
 
 
+# Timeframe-aware SL/TP overrides. Shorter horizons need tighter stops so
+# noise doesn't routinely take us out before the move plays out, and tighter
+# targets so we actually realise gains within the bar window.
+TIMEFRAME_PARAM_OVERRIDES: Dict[str, Dict[str, float]] = {
+    "5m":  {"sl_atr_mult": 0.75, "tp_atr_mult": 1.5},
+    "15m": {"sl_atr_mult": 0.75, "tp_atr_mult": 1.5},
+    "1h":  {"sl_atr_mult": 1.0,  "tp_atr_mult": 2.0},
+    "4h":  {"sl_atr_mult": 1.5,  "tp_atr_mult": 2.0},
+    "1d":  {"sl_atr_mult": 1.5,  "tp_atr_mult": 2.0},
+}
+
+
+def get_timeframe_defaults(timeframe: Optional[str]) -> Dict[str, float]:
+    """Return DEFAULT_PARAMS overlaid with timeframe-specific SL/TP."""
+    merged = dict(DEFAULT_PARAMS)
+    if not timeframe:
+        return merged
+    overrides = TIMEFRAME_PARAM_OVERRIDES.get(str(timeframe))
+    if overrides:
+        merged.update(overrides)
+    return merged
+
+
 # Hard safety bounds — optimizer may never return a value outside these.
 PARAM_BOUNDS: Dict[str, Tuple[float, float]] = {
     "rsi_overbought": (50.0, 90.0),

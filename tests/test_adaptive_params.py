@@ -9,8 +9,10 @@ import pytest
 from adaptive_params import (
     DEFAULT_PARAMS,
     PARAM_BOUNDS,
+    TIMEFRAME_PARAM_OVERRIDES,
     AdaptiveParams,
     _clamp,
+    get_timeframe_defaults,
 )
 
 
@@ -193,3 +195,39 @@ def test_optimize_with_no_data_returns_defaults(tmp_db_path):
     merged = ap.optimize("momentum", "XYZ-USD")
     for k, v in DEFAULT_PARAMS.items():
         assert merged[k] == pytest.approx(v)
+
+
+# ---------------------------------------------------------------------------
+# Timeframe-aware defaults
+# ---------------------------------------------------------------------------
+
+
+def test_timeframe_overrides_defined_for_intraday():
+    for tf in ("5m", "15m", "1h", "4h", "1d"):
+        assert tf in TIMEFRAME_PARAM_OVERRIDES
+
+
+def test_5m_uses_tighter_stops_than_4h():
+    five_m = TIMEFRAME_PARAM_OVERRIDES["5m"]["sl_atr_mult"]
+    four_h = TIMEFRAME_PARAM_OVERRIDES["4h"]["sl_atr_mult"]
+    assert five_m < four_h
+
+
+def test_get_timeframe_defaults_overlays():
+    out = get_timeframe_defaults("5m")
+    assert out["sl_atr_mult"] == 0.75
+    assert out["tp_atr_mult"] == 1.5
+    # Untouched defaults still pass through.
+    assert out["rsi_overbought"] == DEFAULT_PARAMS["rsi_overbought"]
+
+
+def test_get_timeframe_defaults_unknown_returns_defaults():
+    out = get_timeframe_defaults("7d")
+    for k, v in DEFAULT_PARAMS.items():
+        assert out[k] == v
+
+
+def test_get_timeframe_defaults_none_returns_defaults():
+    out = get_timeframe_defaults(None)
+    for k, v in DEFAULT_PARAMS.items():
+        assert out[k] == v

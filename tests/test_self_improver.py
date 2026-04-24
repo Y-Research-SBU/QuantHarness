@@ -341,42 +341,50 @@ def test_run_improvement_cycle_at_zero_trades(tmp_db_path):
     assert out["levels_run"] == []
 
 
-def test_run_improvement_cycle_at_50_trades(tmp_db_path):
+def test_run_improvement_cycle_at_l1_threshold(tmp_db_path):
+    _seed_many(tmp_db_path, "momentum", n_wins=15, n_losses=10)
+    si = SelfImprover(db_path=tmp_db_path)
+    out = si.run_improvement_cycle(total_trades=CADENCE_L1)
+    assert "L1" in out["levels_run"]
+    # Not yet at L2 / L3 / L5.
+    assert "L2" not in out["levels_run"]
+    assert "L3" not in out["levels_run"]
+
+
+def test_run_improvement_cycle_at_l2_threshold(tmp_db_path):
     _seed_many(tmp_db_path, "momentum", n_wins=30, n_losses=20)
     si = SelfImprover(db_path=tmp_db_path)
-    out = si.run_improvement_cycle(total_trades=50)
-    assert "L1" in out["levels_run"]
-    # Not yet at L2 (100) or L3 (200)
-    assert "L2" not in out["levels_run"]
-
-
-def test_run_improvement_cycle_at_100_trades(tmp_db_path):
-    _seed_many(tmp_db_path, "momentum", n_wins=60, n_losses=40)
-    si = SelfImprover(db_path=tmp_db_path)
-    out = si.run_improvement_cycle(total_trades=100)
+    out = si.run_improvement_cycle(total_trades=CADENCE_L2)
     assert "L1" in out["levels_run"]
     assert "L2" in out["levels_run"]
 
 
-def test_run_improvement_cycle_at_200_trades(tmp_db_path):
-    _seed_many(tmp_db_path, "momentum", n_wins=120, n_losses=80)
+def test_run_improvement_cycle_at_l3_threshold(tmp_db_path):
+    _seed_many(tmp_db_path, "momentum", n_wins=60, n_losses=40)
     si = SelfImprover(db_path=tmp_db_path)
-    out = si.run_improvement_cycle(total_trades=200)
+    out = si.run_improvement_cycle(total_trades=CADENCE_L3)
     assert "L1" in out["levels_run"]
     assert "L2" in out["levels_run"]
     assert "L3" in out["levels_run"]
     assert out["model_trained"] is True
 
 
-def test_improvement_cycle_idempotent_on_repeated_calls(tmp_db_path):
-    _seed_many(tmp_db_path, "momentum", n_wins=30, n_losses=20)
+def test_run_improvement_cycle_at_l5_threshold(tmp_db_path):
+    _seed_many(tmp_db_path, "momentum", n_wins=120, n_losses=80)
     si = SelfImprover(db_path=tmp_db_path)
-    # First call at 50 trades fires L1.
-    out1 = si.run_improvement_cycle(total_trades=50)
+    out = si.run_improvement_cycle(total_trades=CADENCE_L5)
+    assert "L5" in out["levels_run"]
+
+
+def test_improvement_cycle_idempotent_on_repeated_calls(tmp_db_path):
+    _seed_many(tmp_db_path, "momentum", n_wins=15, n_losses=10)
+    si = SelfImprover(db_path=tmp_db_path)
+    # First call at the L1 boundary fires L1.
+    out1 = si.run_improvement_cycle(total_trades=CADENCE_L1)
     assert "L1" in out1["levels_run"]
     # Second call with the same trade count should NOT re-fire L1
     # (cadence tracking prevents duplicate work on the same boundary).
-    out2 = si.run_improvement_cycle(total_trades=50)
+    out2 = si.run_improvement_cycle(total_trades=CADENCE_L1)
     assert "L1" not in out2["levels_run"]
 
 

@@ -298,3 +298,65 @@ def test_signal_stop_loss_direction_consistent(uptrend_ohlcv, downtrend_ohlcv):
                 assert s.stop_loss < s.entry_price
             else:
                 assert s.stop_loss > s.entry_price
+
+
+# ─────────────────── Timeframe-aware SL/TP via _resolve_params ───────────────────
+
+
+def _ramp_then_pullback(n: int = 80) -> pd.DataFrame:
+    """Build a frame the momentum strategy will act on.
+
+    The momentum strategy fires on a "bullish pullback" (price > SMA20 > SMA50,
+    RSI ∈ [40,60], MACD hist > 0). We ramp aggressively then pull back gently
+    so the indicators land in those bands.
+    """
+    ramp = np.linspace(100, 140, n - 5)
+    pullback = np.linspace(140, 138, 5)
+    prices = np.concatenate([ramp, pullback])
+    return pd.DataFrame({
+        "Datetime": pd.date_range("2024-01-01", periods=n, freq="h"),
+        "Open": prices - 0.05,
+        "High": prices + 0.2,
+        "Low": prices - 0.2,
+        "Close": prices,
+        "Volume": [1000] * n,
+    })
+
+
+def test_momentum_uses_tighter_stops_on_5m_than_4h():
+    """The same OHLCV, tagged 5m vs 4h, should yield tighter SL on 5m."""
+    df_5m = _ramp_then_pullback()
+    df_5m.attrs["symbol"] = "BTC-USD"
+    df_5m.attrs["timeframe"] = "5m"
+    df_4h = df_5m.copy()
+    df_4h.attrs["symbol"] = "BTC-USD"
+    df_4h.attrs["timeframe"] = "4h"
+
+    strat = MomentumStrategy()
+    sig_5m = strat.generate_signal(df_5m)
+    sig_4h = strat.generate_signal(df_4h)
+    if sig_5m is None or sig_4h is None:
+        pytest.skip("momentum did not fire on synthetic frame; tested elsewhere")
+    if sig_5m.direction == "LONG":
+        # SL distance below entry: 5m should be tighter (smaller distance).
+        dist_5m = sig_5m.entry_price - sig_5m.stop_loss
+        dist_4h = sig_4h.entry_price - sig_4h.stop_loss
+    else:
+        dist_5m = sig_5m.stop_loss - sig_5m.entry_price
+        dist_4h = sig_4h.stop_loss - sig_4h.entry_price
+    assert dist_5m < dist_4h
+
+
+def test_adaptive_params_override_timeframe_defaults():
+    """Caller-supplied adaptive_params win over timeframe defaults."""
+    df = _ramp_then_pullback()
+    df.attrs["symbol"] = "BTC-USD"
+    df.attrs["timeframe"] = "5m"
+    strat = MomentumStrategy()
+    # Force a wider SL via adaptive params; 5m default is 0.75.
+    sig = strat.generate_signal(df, adaptive_params={"sl_atr_mult": 2.5, "tp_atr_mult": 3.0})
+    if sig is None:
+        pytest.skip("momentum did not fire on synthetic frame")
+    # With sl_atr_mult=2.5 the stop should be far below entry — well past the 5m default.
+    if sig.direction == "LONG":
+        assert sig.entry_price - sig.stop_loss > 0

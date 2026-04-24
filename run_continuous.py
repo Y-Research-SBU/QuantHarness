@@ -30,9 +30,10 @@ logger = logging.getLogger(__name__)
 
 
 # Default cadence per category when ``scan_interval_hours`` isn't specified
-# in ``MarketConfig``.
+# in ``MarketConfig``. Crypto runs every 5 minutes now that 5m/15m bars
+# are part of the timeframe fan-out.
 DEFAULT_CADENCE_SECONDS: Dict[MarketCategory, int] = {
-    MarketCategory.CRYPTO: 15 * 60,         # 15 minutes
+    MarketCategory.CRYPTO: 5 * 60,          # 5 minutes
     MarketCategory.STOCKS: 60 * 60,         # 1 hour
     MarketCategory.COMMODITIES: 60 * 60,    # 1 hour
     MarketCategory.FOREX: 60 * 60,          # 1 hour
@@ -45,8 +46,7 @@ def _resolve_cadence(config: MarketConfig) -> int:
     raw = float(config.scan_interval_hours or 0.0)
     if raw <= 0:
         return DEFAULT_CADENCE_SECONDS.get(config.category, 60 * 60)
-    # Crypto: drop to 15 minutes to keep up with intraday flow even when
-    # scan_interval_hours says 4h.
+    # Crypto: clamp to 5 minutes when the config asks for an hour or more.
     if config.category == MarketCategory.CRYPTO and raw >= 1.0:
         return DEFAULT_CADENCE_SECONDS[MarketCategory.CRYPTO]
     return int(raw * 3600)

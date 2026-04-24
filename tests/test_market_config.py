@@ -56,10 +56,10 @@ def test_get_markets_by_category_empty_for_nonexistent():
     assert len(forex) >= 2
 
 
-def test_correlation_groups_contains_crypto():
+def test_correlation_groups_contains_crypto_majors():
     groups = get_correlation_groups()
-    assert "crypto" in groups
-    assert set(groups["crypto"]) == {"BTC-USD", "ETH-USD", "SOL-USD"}
+    assert "crypto_major" in groups
+    assert set(groups["crypto_major"]) >= {"BTC-USD", "ETH-USD", "SOL-USD"}
 
 
 def test_correlation_groups_symbols_exist_in_markets():
@@ -79,3 +79,24 @@ def test_strategy_type_enum_values():
 def test_market_category_enum_values():
     assert MarketCategory.CRYPTO.value == "crypto"
     assert MarketCategory.STOCKS.value == "stocks"
+
+
+def test_crypto_markets_include_5m_and_15m():
+    crypto = get_markets_by_category(MarketCategory.CRYPTO)
+    for symbol, cfg in crypto.items():
+        assert "5m" in cfg.timeframes, f"{symbol} missing 5m"
+        assert "15m" in cfg.timeframes, f"{symbol} missing 15m"
+
+
+def test_crypto_markets_keep_higher_timeframes():
+    crypto = get_markets_by_category(MarketCategory.CRYPTO)
+    for symbol, cfg in crypto.items():
+        # 1h should still be present as the medium-term horizon.
+        assert "1h" in cfg.timeframes, f"{symbol} missing 1h"
+
+
+def test_stocks_unchanged_by_intraday_addition():
+    """Stocks must not silently inherit 5m/15m timeframes."""
+    stocks = get_markets_by_category(MarketCategory.STOCKS)
+    for symbol, cfg in stocks.items():
+        assert "5m" not in cfg.timeframes, f"{symbol} accidentally added 5m"

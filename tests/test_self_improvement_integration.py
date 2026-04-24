@@ -246,21 +246,21 @@ def test_live_trade_then_improvement_cycle(tmp_db_path):
 
 
 def test_trade_accumulation_triggers_l1_at_boundary(tmp_db_path):
-    """As total_trades grows past 50, L1 should fire exactly once per boundary."""
+    """As total_trades grows past CADENCE_L1, L1 should fire exactly once per boundary."""
     _seed_batch(tmp_db_path, "momentum", n_win=30, n_loss=20)
     si = SelfImprover(db_path=tmp_db_path)
     # Below cadence → no L1
-    out_49 = si.run_improvement_cycle(total_trades=49)
-    assert "L1" not in out_49["levels_run"]
-    # Crossing 50 → L1 fires
-    out_50 = si.run_improvement_cycle(total_trades=50)
-    assert "L1" in out_50["levels_run"]
-    # Calling again at 50 → no re-fire
-    out_repeat = si.run_improvement_cycle(total_trades=50)
+    out_below = si.run_improvement_cycle(total_trades=CADENCE_L1 - 1)
+    assert "L1" not in out_below["levels_run"]
+    # Crossing CADENCE_L1 → L1 fires
+    out_first = si.run_improvement_cycle(total_trades=CADENCE_L1)
+    assert "L1" in out_first["levels_run"]
+    # Calling again at the same boundary → no re-fire
+    out_repeat = si.run_improvement_cycle(total_trades=CADENCE_L1)
     assert "L1" not in out_repeat["levels_run"]
-    # Crossing 100 → L1 fires again
-    out_100 = si.run_improvement_cycle(total_trades=100)
-    assert "L1" in out_100["levels_run"]
+    # Crossing the next boundary → L1 fires again
+    out_next = si.run_improvement_cycle(total_trades=CADENCE_L1 * 2)
+    assert "L1" in out_next["levels_run"]
 
 
 def test_regime_history_persisted_via_log_regime(tmp_db_path):

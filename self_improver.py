@@ -50,11 +50,13 @@ WEIGHT_NORMAL = 1.0
 WEIGHT_REDUCED = 0.5
 WEIGHT_DISABLED = 0.0
 
-# Level cadences (in # of closed trades between runs).
-CADENCE_L1 = 50
-CADENCE_L2 = 100
-CADENCE_L3 = 200
-CADENCE_L5 = 500
+# Level cadences (in # of closed trades between runs). Tightened so the
+# 5m/15m crypto fan-out actually feeds the learning loop within hours
+# rather than days.
+CADENCE_L1 = 20
+CADENCE_L2 = 50
+CADENCE_L3 = 100
+CADENCE_L5 = 200
 
 # Regime × strategy affinity priors — used before we have enough data to
 # learn them from outcomes.

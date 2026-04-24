@@ -89,17 +89,18 @@ MARKETS: Dict[str, MarketConfig] = {
     "DOT-USD": _crypto("DOT-USD", "Polkadot", "crypto_l1"),
     "MATIC-USD": _crypto("MATIC-USD", "Polygon", "crypto_l2"),
     "ATOM-USD": _crypto("ATOM-USD", "Cosmos", "crypto_l1"),
-    "UNI-USD": _crypto("UNI-USD", "Uniswap", "crypto_defi"),
+    # "UNI-USD": removed — yfinance reports delisted (2026-04-24)
+    # "ARB-USD": removed — yfinance reports delisted (2026-04-24)
     "AAVE-USD": _crypto("AAVE-USD", "Aave", "crypto_defi"),
 
     # --- Tier 1b: Ecosystem tokens ---
-    "ARB-USD": _crypto("ARB-USD", "Arbitrum", "crypto_l2"),
+
     "OP-USD": _crypto("OP-USD", "Optimism", "crypto_l2"),
     # "SUI-USD": removed — yfinance reports delisted (2026-04-24)
     # "APT-USD": removed — yfinance reports delisted (2026-04-24)
     "SEI-USD": _crypto("SEI-USD", "Sei", "crypto_l1"),
     "TIA-USD": _crypto("TIA-USD", "Celestia", "crypto_l1"),
-    "INJ-USD": _crypto("INJ-USD", "Injective", "crypto_defi"),
+    # "INJ-USD": removed — 5 consecutive stop-losses, chronic counter-trend loser (2026-04-24)
     "NEAR-USD": _crypto("NEAR-USD", "NEAR Protocol", "crypto_l1"),
 
     # --- Tier 2: AI / DePIN tokens ---

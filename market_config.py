@@ -95,8 +95,8 @@ MARKETS: Dict[str, MarketConfig] = {
     # --- Tier 1b: Ecosystem tokens ---
     "ARB-USD": _crypto("ARB-USD", "Arbitrum", "crypto_l2"),
     "OP-USD": _crypto("OP-USD", "Optimism", "crypto_l2"),
-    "SUI-USD": _crypto("SUI-USD", "Sui", "crypto_l1"),
-    "APT-USD": _crypto("APT-USD", "Aptos", "crypto_l1"),
+    # "SUI-USD": removed — yfinance reports delisted (2026-04-24)
+    # "APT-USD": removed — yfinance reports delisted (2026-04-24)
     "SEI-USD": _crypto("SEI-USD", "Sei", "crypto_l1"),
     "TIA-USD": _crypto("TIA-USD", "Celestia", "crypto_l1"),
     "INJ-USD": _crypto("INJ-USD", "Injective", "crypto_defi"),

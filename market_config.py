@@ -130,8 +130,7 @@ MARKETS: Dict[str, MarketConfig] = {
     "BONK-USD": _crypto("BONK-USD", "Bonk", "crypto_meme"),
     "FLOKI-USD": _crypto("FLOKI-USD", "Floki", "crypto_meme"),
     "SHIB-USD": _crypto("SHIB-USD", "Shiba Inu", "crypto_meme"),
-    "ORDI-USD": _crypto("ORDI-USD", "ORDI", "crypto_meme"),
-    "POPCAT-USD": _crypto("POPCAT-USD", "Popcat", "crypto_meme"),
+    # ORDI-USD and POPCAT-USD removed — delisted per yfinance (2026-04-24)
     "TURBO-USD": _crypto("TURBO-USD", "Turbo", "crypto_meme"),
 
     # --- Tier 3b: Mid-cap with high vol ---

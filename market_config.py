@@ -134,56 +134,52 @@ MARKETS: Dict[str, MarketConfig] = {
     "GRT-USD": _crypto("GRT-USD", "The Graph", "crypto_ai"),
     "IMX-USD": _crypto("IMX-USD", "Immutable X", "crypto_l2"),
     "HBAR-USD": _crypto("HBAR-USD", "Hedera", "crypto_l1"),
-    "SOL-USD": MarketConfig(
-        symbol="SOL-USD",
-        display_name="Solana",
-        category=MarketCategory.CRYPTO,
-        timeframes=["4h", "1h"],
-        enabled_strategies=list(_CRYPTO_DEFAULT_STRATEGIES),
-        scan_interval_hours=4.0,
-        correlation_group="crypto",
-    ),
-    # US Stocks
-    "SPY": MarketConfig(
-        symbol="SPY",
-        display_name="S&P 500 ETF",
-        category=MarketCategory.STOCKS,
-        timeframes=["1d", "4h"],
-        scan_interval_hours=24.0,
-        correlation_group="us_equity",
-    ),
-    "QQQ": MarketConfig(
-        symbol="QQQ",
-        display_name="Nasdaq 100 ETF",
-        category=MarketCategory.STOCKS,
-        timeframes=["1d", "4h"],
-        scan_interval_hours=24.0,
-        correlation_group="us_equity",
-    ),
-    "AAPL": MarketConfig(
-        symbol="AAPL",
-        display_name="Apple Inc.",
-        category=MarketCategory.STOCKS,
-        timeframes=["1d", "4h"],
-        scan_interval_hours=24.0,
-        correlation_group="us_tech",
-    ),
-    "TSLA": MarketConfig(
-        symbol="TSLA",
-        display_name="Tesla Inc.",
-        category=MarketCategory.STOCKS,
-        timeframes=["1d", "4h"],
-        scan_interval_hours=24.0,
-        correlation_group="us_tech",
-    ),
-    "NVDA": MarketConfig(
-        symbol="NVDA",
-        display_name="NVIDIA Corp.",
-        category=MarketCategory.STOCKS,
-        timeframes=["1d", "4h"],
-        scan_interval_hours=24.0,
-        correlation_group="us_tech",
-    ),
+
+    # ══════════════════════════════════════════════════════════════
+    # STOCKS — Indices, Mega-cap tech, Semiconductors, Financials, Energy, etc.
+    # ══════════════════════════════════════════════════════════════
+
+    # --- Index ETFs ---
+    "SPY": MarketConfig(symbol="SPY", display_name="S&P 500 ETF", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_index"),
+    "QQQ": MarketConfig(symbol="QQQ", display_name="Nasdaq 100 ETF", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_index"),
+    "IWM": MarketConfig(symbol="IWM", display_name="Russell 2000 ETF", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_index"),
+    "DIA": MarketConfig(symbol="DIA", display_name="Dow Jones ETF", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_index"),
+
+    # --- Sector ETFs ---
+    "XLF": MarketConfig(symbol="XLF", display_name="Financials ETF", category=MarketCategory.STOCKS, timeframes=["1d"], scan_interval_hours=24.0, correlation_group="us_sector"),
+    "XLE": MarketConfig(symbol="XLE", display_name="Energy ETF", category=MarketCategory.STOCKS, timeframes=["1d"], scan_interval_hours=24.0, correlation_group="us_sector"),
+    "XLK": MarketConfig(symbol="XLK", display_name="Tech ETF", category=MarketCategory.STOCKS, timeframes=["1d"], scan_interval_hours=24.0, correlation_group="us_sector"),
+    "XLV": MarketConfig(symbol="XLV", display_name="Healthcare ETF", category=MarketCategory.STOCKS, timeframes=["1d"], scan_interval_hours=24.0, correlation_group="us_sector"),
+
+    # --- Mega-cap Tech ---
+    "AAPL": MarketConfig(symbol="AAPL", display_name="Apple", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_tech"),
+    "MSFT": MarketConfig(symbol="MSFT", display_name="Microsoft", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_tech"),
+    "GOOGL": MarketConfig(symbol="GOOGL", display_name="Google", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_tech"),
+    "AMZN": MarketConfig(symbol="AMZN", display_name="Amazon", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_tech"),
+    "META": MarketConfig(symbol="META", display_name="Meta", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_tech"),
+    "TSLA": MarketConfig(symbol="TSLA", display_name="Tesla", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_tech"),
+    "NVDA": MarketConfig(symbol="NVDA", display_name="NVIDIA", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_semi"),
+
+    # --- Semiconductors ---
+    "AMD": MarketConfig(symbol="AMD", display_name="AMD", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_semi"),
+    "AVGO": MarketConfig(symbol="AVGO", display_name="Broadcom", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_semi"),
+    "TSM": MarketConfig(symbol="TSM", display_name="TSMC", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_semi"),
+    "ARM": MarketConfig(symbol="ARM", display_name="ARM Holdings", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_semi"),
+    "MRVL": MarketConfig(symbol="MRVL", display_name="Marvell", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_semi"),
+
+    # --- High-vol individual stocks ---
+    "COIN": MarketConfig(symbol="COIN", display_name="Coinbase", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_crypto_equity"),
+    "MSTR": MarketConfig(symbol="MSTR", display_name="MicroStrategy", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_crypto_equity"),
+    "PLTR": MarketConfig(symbol="PLTR", display_name="Palantir", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_tech"),
+    "SOFI": MarketConfig(symbol="SOFI", display_name="SoFi", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_fintech"),
+    "SNOW": MarketConfig(symbol="SNOW", display_name="Snowflake", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_tech"),
+    "NET": MarketConfig(symbol="NET", display_name="Cloudflare", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_tech"),
+    "CRWD": MarketConfig(symbol="CRWD", display_name="CrowdStrike", category=MarketCategory.STOCKS, timeframes=["1d", "4h"], scan_interval_hours=24.0, correlation_group="us_tech"),
+    "JPM": MarketConfig(symbol="JPM", display_name="JP Morgan", category=MarketCategory.STOCKS, timeframes=["1d"], scan_interval_hours=24.0, correlation_group="us_bank"),
+    "GS": MarketConfig(symbol="GS", display_name="Goldman Sachs", category=MarketCategory.STOCKS, timeframes=["1d"], scan_interval_hours=24.0, correlation_group="us_bank"),
+    "XOM": MarketConfig(symbol="XOM", display_name="Exxon Mobil", category=MarketCategory.STOCKS, timeframes=["1d"], scan_interval_hours=24.0, correlation_group="us_energy"),
+    "LLY": MarketConfig(symbol="LLY", display_name="Eli Lilly", category=MarketCategory.STOCKS, timeframes=["1d"], scan_interval_hours=24.0, correlation_group="us_pharma"),
+    "BA": MarketConfig(symbol="BA", display_name="Boeing", category=MarketCategory.STOCKS, timeframes=["1d"], scan_interval_hours=24.0, correlation_group="us_industrial"),
     # Commodities
     "GC=F": MarketConfig(
         symbol="GC=F",

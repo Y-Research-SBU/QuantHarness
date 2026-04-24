@@ -95,12 +95,43 @@ _FALLBACK_MARKETS = {
     "GRT-USD": {"display_name": "The Graph", "category": "crypto"},
     "IMX-USD": {"display_name": "Immutable X", "category": "crypto"},
     "HBAR-USD": {"display_name": "Hedera", "category": "crypto"},
-    # Stocks
+    # Index ETFs
     "SPY": {"display_name": "S&P 500 ETF", "category": "stocks"},
     "QQQ": {"display_name": "Nasdaq 100 ETF", "category": "stocks"},
-    "AAPL": {"display_name": "Apple Inc.", "category": "stocks"},
-    "TSLA": {"display_name": "Tesla Inc.", "category": "stocks"},
-    "NVDA": {"display_name": "NVIDIA Corp.", "category": "stocks"},
+    "IWM": {"display_name": "Russell 2000 ETF", "category": "stocks"},
+    "DIA": {"display_name": "Dow Jones ETF", "category": "stocks"},
+    # Sector ETFs
+    "XLF": {"display_name": "Financials ETF", "category": "stocks"},
+    "XLE": {"display_name": "Energy ETF", "category": "stocks"},
+    "XLK": {"display_name": "Tech ETF", "category": "stocks"},
+    "XLV": {"display_name": "Healthcare ETF", "category": "stocks"},
+    # Mega-cap
+    "AAPL": {"display_name": "Apple", "category": "stocks"},
+    "MSFT": {"display_name": "Microsoft", "category": "stocks"},
+    "GOOGL": {"display_name": "Google", "category": "stocks"},
+    "AMZN": {"display_name": "Amazon", "category": "stocks"},
+    "META": {"display_name": "Meta", "category": "stocks"},
+    "TSLA": {"display_name": "Tesla", "category": "stocks"},
+    "NVDA": {"display_name": "NVIDIA", "category": "stocks"},
+    # Semis
+    "AMD": {"display_name": "AMD", "category": "stocks"},
+    "AVGO": {"display_name": "Broadcom", "category": "stocks"},
+    "TSM": {"display_name": "TSMC", "category": "stocks"},
+    "ARM": {"display_name": "ARM Holdings", "category": "stocks"},
+    "MRVL": {"display_name": "Marvell", "category": "stocks"},
+    # High-vol
+    "COIN": {"display_name": "Coinbase", "category": "stocks"},
+    "MSTR": {"display_name": "MicroStrategy", "category": "stocks"},
+    "PLTR": {"display_name": "Palantir", "category": "stocks"},
+    "SOFI": {"display_name": "SoFi", "category": "stocks"},
+    "SNOW": {"display_name": "Snowflake", "category": "stocks"},
+    "NET": {"display_name": "Cloudflare", "category": "stocks"},
+    "CRWD": {"display_name": "CrowdStrike", "category": "stocks"},
+    "JPM": {"display_name": "JP Morgan", "category": "stocks"},
+    "GS": {"display_name": "Goldman Sachs", "category": "stocks"},
+    "XOM": {"display_name": "Exxon Mobil", "category": "stocks"},
+    "LLY": {"display_name": "Eli Lilly", "category": "stocks"},
+    "BA": {"display_name": "Boeing", "category": "stocks"},
     # Commodities & Forex
     "GC=F": {"display_name": "Gold Futures", "category": "commodities"},
     "CL=F": {"display_name": "Crude Oil Futures", "category": "commodities"},
@@ -136,9 +167,19 @@ TRADINGVIEW_SYMBOLS = {
     # Mid-cap
     "LDO-USD": "BINANCE:LDOUSDT", "MKR-USD": "BINANCE:MKRUSDT", "CRV-USD": "BINANCE:CRVUSDT",
     "GRT-USD": "BINANCE:GRTUSDT", "IMX-USD": "BINANCE:IMXUSDT", "HBAR-USD": "BINANCE:HBARUSDT",
-    # Stocks
-    "SPY": "AMEX:SPY", "QQQ": "NASDAQ:QQQ", "AAPL": "NASDAQ:AAPL",
-    "TSLA": "NASDAQ:TSLA", "NVDA": "NASDAQ:NVDA",
+    # Index ETFs
+    "SPY": "AMEX:SPY", "QQQ": "NASDAQ:QQQ", "IWM": "AMEX:IWM", "DIA": "AMEX:DIA",
+    # Sector ETFs
+    "XLF": "AMEX:XLF", "XLE": "AMEX:XLE", "XLK": "AMEX:XLK", "XLV": "AMEX:XLV",
+    # Mega-cap tech
+    "AAPL": "NASDAQ:AAPL", "MSFT": "NASDAQ:MSFT", "GOOGL": "NASDAQ:GOOGL",
+    "AMZN": "NASDAQ:AMZN", "META": "NASDAQ:META", "TSLA": "NASDAQ:TSLA", "NVDA": "NASDAQ:NVDA",
+    # Semiconductors
+    "AMD": "NASDAQ:AMD", "AVGO": "NASDAQ:AVGO", "TSM": "NYSE:TSM", "ARM": "NASDAQ:ARM", "MRVL": "NASDAQ:MRVL",
+    # High-vol stocks
+    "COIN": "NASDAQ:COIN", "MSTR": "NASDAQ:MSTR", "PLTR": "NYSE:PLTR", "SOFI": "NASDAQ:SOFI",
+    "SNOW": "NYSE:SNOW", "NET": "NYSE:NET", "CRWD": "NASDAQ:CRWD",
+    "JPM": "NYSE:JPM", "GS": "NYSE:GS", "XOM": "NYSE:XOM", "LLY": "NYSE:LLY", "BA": "NYSE:BA",
     # Commodities & Forex
     "GC=F": "TVC:GOLD", "CL=F": "TVC:USOIL",
     "EURUSD=X": "FX:EURUSD", "GBPUSD=X": "FX:GBPUSD",

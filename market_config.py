@@ -52,26 +52,88 @@ _CRYPTO_DEFAULT_STRATEGIES = [
 ]
 
 
+def _crypto(symbol: str, display_name: str, group: str = "crypto_major") -> MarketConfig:
+    """Helper to create a crypto market config with standard settings."""
+    return MarketConfig(
+        symbol=symbol,
+        display_name=display_name,
+        category=MarketCategory.CRYPTO,
+        timeframes=["4h", "1h"],
+        enabled_strategies=list(_CRYPTO_DEFAULT_STRATEGIES),
+        scan_interval_hours=4.0,
+        correlation_group=group,
+    )
+
+
 MARKETS: Dict[str, MarketConfig] = {
-    # Crypto — Kronos strategies enabled by default
-    "BTC-USD": MarketConfig(
-        symbol="BTC-USD",
-        display_name="Bitcoin",
-        category=MarketCategory.CRYPTO,
-        timeframes=["4h", "1h"],
-        enabled_strategies=list(_CRYPTO_DEFAULT_STRATEGIES),
-        scan_interval_hours=4.0,
-        correlation_group="crypto",
-    ),
-    "ETH-USD": MarketConfig(
-        symbol="ETH-USD",
-        display_name="Ethereum",
-        category=MarketCategory.CRYPTO,
-        timeframes=["4h", "1h"],
-        enabled_strategies=list(_CRYPTO_DEFAULT_STRATEGIES),
-        scan_interval_hours=4.0,
-        correlation_group="crypto",
-    ),
+    # ══════════════════════════════════════════════════════════════
+    # CRYPTO — 50 markets across majors, L1/L2, DeFi, AI, memes
+    # ══════════════════════════════════════════════════════════════
+
+    # --- Tier 0: Majors ---
+    "BTC-USD": _crypto("BTC-USD", "Bitcoin", "crypto_major"),
+    "ETH-USD": _crypto("ETH-USD", "Ethereum", "crypto_major"),
+    "SOL-USD": _crypto("SOL-USD", "Solana", "crypto_major"),
+
+    # --- Tier 1: Large-cap alts ---
+    "DOGE-USD": _crypto("DOGE-USD", "Dogecoin", "crypto_meme"),
+    "ADA-USD": _crypto("ADA-USD", "Cardano", "crypto_l1"),
+    "AVAX-USD": _crypto("AVAX-USD", "Avalanche", "crypto_l1"),
+    "LINK-USD": _crypto("LINK-USD", "Chainlink", "crypto_defi"),
+    "DOT-USD": _crypto("DOT-USD", "Polkadot", "crypto_l1"),
+    "MATIC-USD": _crypto("MATIC-USD", "Polygon", "crypto_l2"),
+    "ATOM-USD": _crypto("ATOM-USD", "Cosmos", "crypto_l1"),
+    "UNI-USD": _crypto("UNI-USD", "Uniswap", "crypto_defi"),
+    "AAVE-USD": _crypto("AAVE-USD", "Aave", "crypto_defi"),
+
+    # --- Tier 1b: Ecosystem tokens ---
+    "ARB-USD": _crypto("ARB-USD", "Arbitrum", "crypto_l2"),
+    "OP-USD": _crypto("OP-USD", "Optimism", "crypto_l2"),
+    "SUI-USD": _crypto("SUI-USD", "Sui", "crypto_l1"),
+    "APT-USD": _crypto("APT-USD", "Aptos", "crypto_l1"),
+    "SEI-USD": _crypto("SEI-USD", "Sei", "crypto_l1"),
+    "TIA-USD": _crypto("TIA-USD", "Celestia", "crypto_l1"),
+    "INJ-USD": _crypto("INJ-USD", "Injective", "crypto_defi"),
+    "NEAR-USD": _crypto("NEAR-USD", "NEAR Protocol", "crypto_l1"),
+
+    # --- Tier 2: AI / DePIN tokens ---
+    "FET-USD": _crypto("FET-USD", "Fetch.ai", "crypto_ai"),
+    "RNDR-USD": _crypto("RNDR-USD", "Render", "crypto_ai"),
+    "WLD-USD": _crypto("WLD-USD", "Worldcoin", "crypto_ai"),
+    "TAO-USD": _crypto("TAO-USD", "Bittensor", "crypto_ai"),
+    "AR-USD": _crypto("AR-USD", "Arweave", "crypto_ai"),
+
+    # --- Tier 2b: DeFi / Liquid staking ---
+    "PENDLE-USD": _crypto("PENDLE-USD", "Pendle", "crypto_defi"),
+    "ENA-USD": _crypto("ENA-USD", "Ethena", "crypto_defi"),
+    "ONDO-USD": _crypto("ONDO-USD", "Ondo Finance", "crypto_defi"),
+    "DYDX-USD": _crypto("DYDX-USD", "dYdX", "crypto_defi"),
+    "JUP-USD": _crypto("JUP-USD", "Jupiter", "crypto_defi"),
+    "RUNE-USD": _crypto("RUNE-USD", "THORChain", "crypto_defi"),
+
+    # --- Tier 2c: Infrastructure ---
+    "STX-USD": _crypto("STX-USD", "Stacks", "crypto_l2"),
+    "FTM-USD": _crypto("FTM-USD", "Fantom/Sonic", "crypto_l1"),
+    "STRK-USD": _crypto("STRK-USD", "Starknet", "crypto_l2"),
+    "EIGEN-USD": _crypto("EIGEN-USD", "EigenLayer", "crypto_l2"),
+
+    # --- Tier 3: Meme / Momentum ---
+    "PEPE-USD": _crypto("PEPE-USD", "Pepe", "crypto_meme"),
+    "WIF-USD": _crypto("WIF-USD", "dogwifhat", "crypto_meme"),
+    "BONK-USD": _crypto("BONK-USD", "Bonk", "crypto_meme"),
+    "FLOKI-USD": _crypto("FLOKI-USD", "Floki", "crypto_meme"),
+    "SHIB-USD": _crypto("SHIB-USD", "Shiba Inu", "crypto_meme"),
+    "ORDI-USD": _crypto("ORDI-USD", "ORDI", "crypto_meme"),
+    "POPCAT-USD": _crypto("POPCAT-USD", "Popcat", "crypto_meme"),
+    "TURBO-USD": _crypto("TURBO-USD", "Turbo", "crypto_meme"),
+
+    # --- Tier 3b: Mid-cap with high vol ---
+    "LDO-USD": _crypto("LDO-USD", "Lido DAO", "crypto_defi"),
+    "MKR-USD": _crypto("MKR-USD", "Maker", "crypto_defi"),
+    "CRV-USD": _crypto("CRV-USD", "Curve", "crypto_defi"),
+    "GRT-USD": _crypto("GRT-USD", "The Graph", "crypto_ai"),
+    "IMX-USD": _crypto("IMX-USD", "Immutable X", "crypto_l2"),
+    "HBAR-USD": _crypto("HBAR-USD", "Hedera", "crypto_l1"),
     "SOL-USD": MarketConfig(
         symbol="SOL-USD",
         display_name="Solana",

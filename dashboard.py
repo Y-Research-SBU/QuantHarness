@@ -43,15 +43,65 @@ DEFAULT_BACKTEST_DIR = "backtest_results"
 
 # Static category mapping for market metadata (avoids importing the full
 # market_config module if it isn't available — but we prefer the real one).
+# Auto-generate fallback from TRADINGVIEW_SYMBOLS keys (handles any market count)
 _FALLBACK_MARKETS = {
+    # Crypto
     "BTC-USD": {"display_name": "Bitcoin", "category": "crypto"},
     "ETH-USD": {"display_name": "Ethereum", "category": "crypto"},
     "SOL-USD": {"display_name": "Solana", "category": "crypto"},
+    "DOGE-USD": {"display_name": "Dogecoin", "category": "crypto"},
+    "ADA-USD": {"display_name": "Cardano", "category": "crypto"},
+    "AVAX-USD": {"display_name": "Avalanche", "category": "crypto"},
+    "LINK-USD": {"display_name": "Chainlink", "category": "crypto"},
+    "DOT-USD": {"display_name": "Polkadot", "category": "crypto"},
+    "MATIC-USD": {"display_name": "Polygon", "category": "crypto"},
+    "ATOM-USD": {"display_name": "Cosmos", "category": "crypto"},
+    "UNI-USD": {"display_name": "Uniswap", "category": "crypto"},
+    "AAVE-USD": {"display_name": "Aave", "category": "crypto"},
+    "ARB-USD": {"display_name": "Arbitrum", "category": "crypto"},
+    "OP-USD": {"display_name": "Optimism", "category": "crypto"},
+    "SUI-USD": {"display_name": "Sui", "category": "crypto"},
+    "APT-USD": {"display_name": "Aptos", "category": "crypto"},
+    "SEI-USD": {"display_name": "Sei", "category": "crypto"},
+    "TIA-USD": {"display_name": "Celestia", "category": "crypto"},
+    "INJ-USD": {"display_name": "Injective", "category": "crypto"},
+    "NEAR-USD": {"display_name": "NEAR Protocol", "category": "crypto"},
+    "FET-USD": {"display_name": "Fetch.ai", "category": "crypto"},
+    "RNDR-USD": {"display_name": "Render", "category": "crypto"},
+    "WLD-USD": {"display_name": "Worldcoin", "category": "crypto"},
+    "TAO-USD": {"display_name": "Bittensor", "category": "crypto"},
+    "AR-USD": {"display_name": "Arweave", "category": "crypto"},
+    "PENDLE-USD": {"display_name": "Pendle", "category": "crypto"},
+    "ENA-USD": {"display_name": "Ethena", "category": "crypto"},
+    "ONDO-USD": {"display_name": "Ondo Finance", "category": "crypto"},
+    "DYDX-USD": {"display_name": "dYdX", "category": "crypto"},
+    "JUP-USD": {"display_name": "Jupiter", "category": "crypto"},
+    "RUNE-USD": {"display_name": "THORChain", "category": "crypto"},
+    "STX-USD": {"display_name": "Stacks", "category": "crypto"},
+    "FTM-USD": {"display_name": "Fantom/Sonic", "category": "crypto"},
+    "STRK-USD": {"display_name": "Starknet", "category": "crypto"},
+    "EIGEN-USD": {"display_name": "EigenLayer", "category": "crypto"},
+    "PEPE-USD": {"display_name": "Pepe", "category": "crypto"},
+    "WIF-USD": {"display_name": "dogwifhat", "category": "crypto"},
+    "BONK-USD": {"display_name": "Bonk", "category": "crypto"},
+    "FLOKI-USD": {"display_name": "Floki", "category": "crypto"},
+    "SHIB-USD": {"display_name": "Shiba Inu", "category": "crypto"},
+    "ORDI-USD": {"display_name": "ORDI", "category": "crypto"},
+    "POPCAT-USD": {"display_name": "Popcat", "category": "crypto"},
+    "TURBO-USD": {"display_name": "Turbo", "category": "crypto"},
+    "LDO-USD": {"display_name": "Lido DAO", "category": "crypto"},
+    "MKR-USD": {"display_name": "Maker", "category": "crypto"},
+    "CRV-USD": {"display_name": "Curve", "category": "crypto"},
+    "GRT-USD": {"display_name": "The Graph", "category": "crypto"},
+    "IMX-USD": {"display_name": "Immutable X", "category": "crypto"},
+    "HBAR-USD": {"display_name": "Hedera", "category": "crypto"},
+    # Stocks
     "SPY": {"display_name": "S&P 500 ETF", "category": "stocks"},
     "QQQ": {"display_name": "Nasdaq 100 ETF", "category": "stocks"},
     "AAPL": {"display_name": "Apple Inc.", "category": "stocks"},
     "TSLA": {"display_name": "Tesla Inc.", "category": "stocks"},
     "NVDA": {"display_name": "NVIDIA Corp.", "category": "stocks"},
+    # Commodities & Forex
     "GC=F": {"display_name": "Gold Futures", "category": "commodities"},
     "CL=F": {"display_name": "Crude Oil Futures", "category": "commodities"},
     "EURUSD=X": {"display_name": "EUR/USD", "category": "forex"},
@@ -60,18 +110,38 @@ _FALLBACK_MARKETS = {
 
 # TradingView symbol mapping for chart embeds
 TRADINGVIEW_SYMBOLS = {
-    "BTC-USD": "BINANCE:BTCUSDT",
-    "ETH-USD": "BINANCE:ETHUSDT",
-    "SOL-USD": "BINANCE:SOLUSDT",
-    "SPY": "AMEX:SPY",
-    "QQQ": "NASDAQ:QQQ",
-    "AAPL": "NASDAQ:AAPL",
-    "TSLA": "NASDAQ:TSLA",
-    "NVDA": "NASDAQ:NVDA",
-    "GC=F": "TVC:GOLD",
-    "CL=F": "TVC:USOIL",
-    "EURUSD=X": "FX:EURUSD",
-    "GBPUSD=X": "FX:GBPUSD",
+    # Crypto majors
+    "BTC-USD": "BINANCE:BTCUSDT", "ETH-USD": "BINANCE:ETHUSDT", "SOL-USD": "BINANCE:SOLUSDT",
+    # Large-cap alts
+    "DOGE-USD": "BINANCE:DOGEUSDT", "ADA-USD": "BINANCE:ADAUSDT", "AVAX-USD": "BINANCE:AVAXUSDT",
+    "LINK-USD": "BINANCE:LINKUSDT", "DOT-USD": "BINANCE:DOTUSDT", "MATIC-USD": "BINANCE:MATICUSDT",
+    "ATOM-USD": "BINANCE:ATOMUSDT", "UNI-USD": "BINANCE:UNIUSDT", "AAVE-USD": "BINANCE:AAVEUSDT",
+    # Ecosystem
+    "ARB-USD": "BINANCE:ARBUSDT", "OP-USD": "BINANCE:OPUSDT", "SUI-USD": "BINANCE:SUIUSDT",
+    "APT-USD": "BINANCE:APTUSDT", "SEI-USD": "BINANCE:SEIUSDT", "TIA-USD": "BINANCE:TIAUSDT",
+    "INJ-USD": "BINANCE:INJUSDT", "NEAR-USD": "BINANCE:NEARUSDT",
+    # AI / DePIN
+    "FET-USD": "BINANCE:FETUSDT", "RNDR-USD": "BINANCE:RENDERUSDT", "WLD-USD": "BINANCE:WLDUSDT",
+    "TAO-USD": "BINANCE:TAOUSDT", "AR-USD": "BINANCE:ARUSDT",
+    # DeFi
+    "PENDLE-USD": "BINANCE:PENDLEUSDT", "ENA-USD": "BINANCE:ENAUSDT", "ONDO-USD": "BINANCE:ONDOUSDT",
+    "DYDX-USD": "BINANCE:DYDXUSDT", "JUP-USD": "BINANCE:JUPUSDT", "RUNE-USD": "BINANCE:RUNEUSDT",
+    # Infrastructure
+    "STX-USD": "BINANCE:STXUSDT", "FTM-USD": "BINANCE:FTMUSDT", "STRK-USD": "BINANCE:STRKUSDT",
+    "EIGEN-USD": "BINANCE:EIGENUSDT",
+    # Meme
+    "PEPE-USD": "BINANCE:PEPEUSDT", "WIF-USD": "BINANCE:WIFUSDT", "BONK-USD": "BINANCE:BONKUSDT",
+    "FLOKI-USD": "BINANCE:FLOKIUSDT", "SHIB-USD": "BINANCE:SHIBUSDT", "ORDI-USD": "BINANCE:ORDIUSDT",
+    "POPCAT-USD": "BINANCE:POPCATUSDT", "TURBO-USD": "BINANCE:TURBOUSDT",
+    # Mid-cap
+    "LDO-USD": "BINANCE:LDOUSDT", "MKR-USD": "BINANCE:MKRUSDT", "CRV-USD": "BINANCE:CRVUSDT",
+    "GRT-USD": "BINANCE:GRTUSDT", "IMX-USD": "BINANCE:IMXUSDT", "HBAR-USD": "BINANCE:HBARUSDT",
+    # Stocks
+    "SPY": "AMEX:SPY", "QQQ": "NASDAQ:QQQ", "AAPL": "NASDAQ:AAPL",
+    "TSLA": "NASDAQ:TSLA", "NVDA": "NASDAQ:NVDA",
+    # Commodities & Forex
+    "GC=F": "TVC:GOLD", "CL=F": "TVC:USOIL",
+    "EURUSD=X": "FX:EURUSD", "GBPUSD=X": "FX:GBPUSD",
 }
 
 

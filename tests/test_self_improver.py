@@ -83,14 +83,22 @@ def _seed_trade(
         return int(cur.lastrowid)
 
 
-def _seed_many(db_path: str, strategy: str, n_wins: int, n_losses: int, symbol: str = "BTC-USD"):
+def _seed_many(
+    db_path: str,
+    strategy: str,
+    n_wins: int,
+    n_losses: int,
+    symbol: str = "BTC-USD",
+    win_pnl: float = 25.0,
+    loss_pnl: float = -15.0,
+):
     base = datetime.utcnow() - timedelta(hours=n_wins + n_losses)
     for i in range(n_wins):
         t = (base + timedelta(hours=i)).isoformat()
-        _seed_trade(db_path, strategy, pnl=25.0, symbol=symbol, entry_time=t, exit_time=t)
+        _seed_trade(db_path, strategy, pnl=win_pnl, symbol=symbol, entry_time=t, exit_time=t)
     for i in range(n_losses):
         t = (base + timedelta(hours=n_wins + i)).isoformat()
-        _seed_trade(db_path, strategy, pnl=-15.0, symbol=symbol, entry_time=t, exit_time=t)
+        _seed_trade(db_path, strategy, pnl=loss_pnl, symbol=symbol, entry_time=t, exit_time=t)
 
 
 # ---------------------------------------------------------------------------
@@ -121,11 +129,26 @@ def test_get_strategy_weights_disables_negative_sharpe(tmp_db_path):
 
 
 def test_get_strategy_weights_doubles_high_sharpe(tmp_db_path):
-    # Nearly all wins → very high sharpe
+    # Nearly all wins → very high sharpe AND high win rate
     _seed_many(tmp_db_path, "momentum", n_wins=60, n_losses=2)
     si = SelfImprover(db_path=tmp_db_path)
     weights = si.get_strategy_weights()
     assert weights["momentum"] == WEIGHT_HIGH_SHARPE
+
+
+def test_high_sharpe_low_win_rate_demoted_to_normal(tmp_db_path):
+    """A strategy with high Sharpe but <25% win rate should NOT get the
+    2x boost — it should be demoted to WEIGHT_NORMAL to prevent
+    over-allocating to a lucky-few-big-wins pattern."""
+    # 8 huge wins among 50 losses → positive sharpe from fat-tail winners
+    # but only 13.8% win rate
+    _seed_many(tmp_db_path, "fat_tail_strat", n_wins=8, n_losses=50, win_pnl=25.0, loss_pnl=-2.0)
+    si = SelfImprover(db_path=tmp_db_path)
+    weights = si.get_strategy_weights()
+    # Should NOT be HIGH_SHARPE despite positive sharpe
+    assert weights["fat_tail_strat"] != WEIGHT_HIGH_SHARPE
+    # Should be at most WEIGHT_NORMAL (could be DISABLED if sharpe goes negative)
+    assert weights["fat_tail_strat"] <= WEIGHT_NORMAL
 
 
 def test_get_strategy_weights_reduced_for_small_negative_sharpe(tmp_db_path):

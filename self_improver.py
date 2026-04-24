@@ -46,7 +46,12 @@ MIN_TRADES_FOR_DISABLE = 10
 
 # Emergency disable: if win rate is below this after MIN_TRADES_FOR_DISABLE trades,
 # disable regardless of sharpe (catches strategies that win big rarely but bleed)
-EMERGENCY_DISABLE_WIN_RATE = 0.10
+EMERGENCY_DISABLE_WIN_RATE = 0.15
+
+# Minimum win-rate floor for high-sharpe boost: a strategy must achieve at
+# least this win rate to qualify for WEIGHT_HIGH_SHARPE.  Prevents a few
+# outsized winners from masking a chronic losing streak.
+HIGH_SHARPE_MIN_WIN_RATE = 0.25
 
 # Zero-win emergency: disable if win rate is exactly 0% after this many trades
 # (lower threshold than MIN_TRADES_FOR_DISABLE to catch total-loss strategies faster)
@@ -233,8 +238,12 @@ class SelfImprover:
                 weights[strat] = WEIGHT_DISABLED
             elif n >= self.min_trades_for_disable and win_rate < EMERGENCY_DISABLE_WIN_RATE:
                 weights[strat] = WEIGHT_DISABLED
-            elif sharpe > 1.5:
+            elif sharpe > 1.5 and win_rate >= HIGH_SHARPE_MIN_WIN_RATE:
                 weights[strat] = WEIGHT_HIGH_SHARPE
+            elif sharpe > 1.5 and win_rate < HIGH_SHARPE_MIN_WIN_RATE:
+                # High Sharpe but poor win rate — demote to normal weight
+                # to avoid over-leveraging a few lucky big wins.
+                weights[strat] = WEIGHT_NORMAL
             elif sharpe >= 0.5:
                 weights[strat] = WEIGHT_NORMAL
             elif sharpe >= 0:

@@ -121,11 +121,11 @@ MARKETS: Dict[str, MarketConfig] = {
     # --- Tier 2c: Infrastructure ---
     "STX-USD": _crypto("STX-USD", "Stacks", "crypto_l2"),
     "FTM-USD": _crypto("FTM-USD", "Fantom/Sonic", "crypto_l1"),
-    "STRK-USD": _crypto("STRK-USD", "Starknet", "crypto_l2"),
+    # STRK-USD removed — delisted per yfinance (2026-04-24)
     "EIGEN-USD": _crypto("EIGEN-USD", "EigenLayer", "crypto_l2"),
 
     # --- Tier 3: Meme / Momentum ---
-    "PEPE-USD": _crypto("PEPE-USD", "Pepe", "crypto_meme"),
+    # PEPE-USD removed — delisted per yfinance (2026-04-24)
     "WIF-USD": _crypto("WIF-USD", "dogwifhat", "crypto_meme"),
     "BONK-USD": _crypto("BONK-USD", "Bonk", "crypto_meme"),
     "FLOKI-USD": _crypto("FLOKI-USD", "Floki", "crypto_meme"),

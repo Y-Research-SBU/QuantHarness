@@ -292,6 +292,14 @@ class KronosForecastAgent:
             x["volume"] = df[cols["volume"]].astype(float).values
         else:
             x["volume"] = 0.0
+
+        # Clean NaN values — forward-fill then back-fill, drop any remaining.
+        x = x.ffill().bfill()
+        if x[required + ["volume"]].isna().any().any():
+            x = x.dropna(subset=required + ["volume"]).reset_index(drop=True)
+        if len(x) == 0:
+            raise ValueError("All rows were NaN after cleaning")
+
         x["amount"] = x["volume"] * x[required].mean(axis=1)
 
         # Truncate to the predictor's max context.

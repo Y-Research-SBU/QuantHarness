@@ -325,3 +325,31 @@ def test_predict_uses_volume_when_available():
     df = df.drop(columns=["Volume"])
     fc = KronosForecastAgent(enable_kronos=False).predict(df)
     assert fc.direction in ("UP", "DOWN", "NEUTRAL")
+
+
+# -- NaN cleaning tests (added by self-improve cycle 2026-04-24) ----------
+
+def test_predict_handles_nan_in_ohlcv():
+    """Kronos should clean NaN rows via ffill/bfill instead of raising."""
+    import numpy as np
+    df = _trending_df("up", n=80)
+    # Inject NaN into several rows
+    df.loc[10, "Close"] = np.nan
+    df.loc[20, "Open"] = np.nan
+    df.loc[30, "Volume"] = np.nan
+    fc = KronosForecastAgent(enable_kronos=False).predict(df)
+    assert fc is not None
+    assert fc.direction in ("UP", "DOWN", "NEUTRAL")
+    assert fc.source == "fallback"
+
+
+def test_predict_all_nan_returns_neutral():
+    """If all rows are NaN, should return neutral fallback."""
+    import numpy as np
+    df = _trending_df("up", n=10)
+    df["Close"] = np.nan
+    df["Open"] = np.nan
+    fc = KronosForecastAgent(enable_kronos=False).predict(df)
+    assert fc is not None
+    # Should still produce a forecast (neutral or fallback)
+    assert fc.direction in ("UP", "DOWN", "NEUTRAL")

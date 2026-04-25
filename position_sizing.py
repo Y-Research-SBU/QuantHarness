@@ -72,6 +72,9 @@ def calculate_position_size(
     max_risk_pct: float = 0.02,
     risk_reward_ratio: float = 1.5,
     max_position_pct: float = 0.25,
+    signal_strength: float = 1.0,
+    min_position_size: float = 0.0,
+    max_position_size: float = float("inf"),
 ) -> PositionSizeResult:
     """
     Calculate position size using Half-Kelly criterion with safety caps.
@@ -142,10 +145,26 @@ def calculate_position_size(
     quantity = risk_usd / risk_per_unit
     position_size_usd = quantity * entry_price
     
+    # Scale position by signal strength (0.0 – 1.0 → 50% – 100%)
+    strength_scale = 0.5 + 0.5 * max(0.0, min(1.0, signal_strength))
+    position_size_usd *= strength_scale
+    quantity *= strength_scale
+    risk_usd *= strength_scale
+
     # Cap position size at max_position_pct of portfolio
     max_position_usd = portfolio_balance * max_position_pct
     if position_size_usd > max_position_usd:
         position_size_usd = max_position_usd
+        quantity = position_size_usd / entry_price
+        risk_usd = quantity * risk_per_unit
+
+    # Apply explicit min/max position size bounds
+    if max_position_size < float("inf") and position_size_usd > max_position_size:
+        position_size_usd = max_position_size
+        quantity = position_size_usd / entry_price
+        risk_usd = quantity * risk_per_unit
+    if position_size_usd < min_position_size:
+        position_size_usd = min_position_size
         quantity = position_size_usd / entry_price
         risk_usd = quantity * risk_per_unit
     

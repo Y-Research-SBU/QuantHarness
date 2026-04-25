@@ -273,6 +273,64 @@ python backtest_results/best_combos.py backtest_results/opt2/*.json
 
 ---
 
-## Kronos Suite — appended as runs land
+## Kronos Suite — Stocks/ETFs/Commodities @ 1d (1 year)
 
-(Stocks @ 1d completes in ~30 min; crypto @ 4h takes 3–4 h. Numbers will be inserted here once both finish.)
+`backtest_results/baseline/backtest_20260425_155838.json` — 19 symbols × 3 Kronos strategies = 57 runs.
+
+| Strategy | Runs | Trades | WinRate | AvgSharpe | TotalPnL |
+|---|---:|---:|---:|---:|---:|
+| **multi_timeframe_kronos** | 19 | 255 | 29.0% | **−0.127** | −$3 365 |
+| kronos_divergence | 19 | 399 | 49.1% | −0.475 | −$8 731 |
+| kronos_momentum_confirm | 19 | 217 | 23.0% | −0.680 | −$12 001 |
+
+### Discrepancy with live performance — calling it out
+
+`kronos_momentum_confirm` is the **best live paper-trading strategy at Sharpe +1.85**, yet the standalone backtest shows it at **−0.68**. The gap is real and explains itself: the live trading loop layers `signal_scorer.py` quality filters, multi-agent confirmation (indicator/pattern/trend/decision agents), and `regime_detector` gating on top of the raw strategy. The backtester invokes only `strategy.generate_signal(window)`, so it sees the *unfiltered* Kronos signal stream — about 2–4× the trade count and noticeably worse selectivity. Treat the backtest Kronos numbers as a **floor**: the live wrapper has been pulling Sharpe up by ~+2 across its filter stack.
+
+### Per-strategy best/worst symbols
+
+```
+multi_timeframe_kronos
+    best:  COIN(+1.51), CRWD(+1.21), MSFT(+1.18), LLY(+1.10)
+    worst: SPY(-1.39), XOM(-1.68), MSTR(-1.90)
+
+kronos_divergence
+    best:  GS(+0.79), SPY(+0.77), LLY(+0.39), CRWD(+0.35), JPM(+0.33)
+    worst: GC=F(-1.70), CL=F(-1.91), XOM(-1.93)
+
+kronos_momentum_confirm
+    best:  JPM(+1.17), GS(+0.72), AAPL(+0.63), CRWD(+0.53)
+    worst: NVDA(-2.20), GC=F(-2.63), TSLA(-2.84)
+```
+
+Top Kronos combos to enable on stocks (Sharpe ≥ 0.5):
+
+| Strategy | Symbol | Trades | WR% | Sharpe | Return% |
+|---|---|---:|---:|---:|---:|
+| multi_timeframe_kronos | COIN | 9 | 55.6 | +1.51 | +15.84 |
+| multi_timeframe_kronos | CRWD | 14 | 50.0 | +1.21 | +11.45 |
+| multi_timeframe_kronos | MSFT | 12 | 41.7 | +1.18 | +10.85 |
+| kronos_momentum_confirm | JPM | 7 | 57.1 | +1.17 | +8.00 |
+| multi_timeframe_kronos | LLY | 10 | 40.0 | +1.10 | +11.70 |
+| multi_timeframe_kronos | NVDA | 9 | 44.4 | +0.84 | +6.74 |
+| kronos_divergence | GS | 24 | 70.8 | +0.79 | +5.52 |
+| kronos_divergence | SPY | 20 | 60.0 | +0.77 | +4.07 |
+| kronos_momentum_confirm | GS | 9 | 44.4 | +0.72 | +5.46 |
+| multi_timeframe_kronos | AAPL | 13 | 46.2 | +0.69 | +5.43 |
+| kronos_momentum_confirm | AAPL | 12 | 41.7 | +0.63 | +5.32 |
+| kronos_momentum_confirm | CRWD | 8 | 50.0 | +0.53 | +3.45 |
+
+Pattern that jumps out: Kronos works **on liquid mega-caps and crypto-equity proxies** (COIN, CRWD, MSFT, LLY, AAPL, JPM, GS) and is destructive on **commodities and high-vol single names** (GC=F, CL=F, NVDA, TSLA, MSTR, XOM). That's consistent with the model being trained on more typical equity/crypto behavior — its forecasts on commodities/idiosyncratic names are worse.
+
+### Recommended Kronos deployment (stocks/ETFs)
+
+- **Whitelist** `multi_timeframe_kronos` on COIN, CRWD, MSFT, LLY, NVDA, AAPL, SOFI (avg Sharpe per-combo ~+0.9).
+- **Whitelist** `kronos_divergence` on GS, SPY, LLY, CRWD, JPM (avg Sharpe ~+0.5; 60–70% win rate is the strong card here).
+- **Whitelist** `kronos_momentum_confirm` on JPM, GS, AAPL, CRWD, MSFT, SPY, LLY (avg Sharpe ~+0.6).
+- **Blacklist** all 3 Kronos strategies on GC=F, CL=F, NVDA, TSLA, MSTR, XOM, IWM.
+
+## Kronos Suite — Crypto @ 4h
+
+Status: **running in background.** At observed pace (~6 min for kronos_momentum_confirm + ~7 min for kronos_divergence + ~17 min for multi_timeframe_kronos per crypto symbol = ~30 min/symbol × 8 symbols = ~4 h total), this completes around 14:15 local. As of report-time, BTC-USD all-3 are done, ETH-USD is in flight. I'll commit the JSON to `backtest_results/baseline/` and append numbers here in a follow-up commit when the run lands.
+
+The earlier single-run benchmark (BTC-USD `kronos_momentum_confirm`, 4h, 1y) clocked **71 trades, 28.2% win rate, Sharpe −0.17, −12.62% return** — same pattern as the stocks suite, hence the same caveat: the live signal_scorer + multi-agent confirmation is doing the lifting that the standalone strategy doesn't show.

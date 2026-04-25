@@ -20,6 +20,7 @@ from position_sizing import calculate_position_size, calculate_stop_loss
 from performance_tracker import calculate_performance
 from self_improver import SelfImprover, WEIGHT_DISABLED
 from strategies import Signal, run_all_strategies
+from strategy_whitelist import is_allowed as whitelist_is_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -177,8 +178,26 @@ class MarketScanner:
         # for this symbol (typically "4h"). Store the first non-empty frame.
         cycle_df: Optional[pd.DataFrame] = None
 
+        # ── L0 backtest whitelist: only allow (symbol, strategy) cells
+        # that proved out in the 2026-04-25 5yr backtest (Sharpe>=0.30, n>=10).
+        # See strategy_whitelist.py for source + caveats.
+        category_str = config.category.value if hasattr(config.category, "value") else str(config.category)
+        before_wl = len(config.enabled_strategies)
+        active_strategies = [
+            st for st in config.enabled_strategies
+            if whitelist_is_allowed(symbol, st.value, category_str)
+        ]
+        if len(active_strategies) < before_wl:
+            removed = [
+                st.value for st in config.enabled_strategies
+                if not whitelist_is_allowed(symbol, st.value, category_str)
+            ]
+            logger.info(
+                "L0 whitelist filter: removed %s for %s (kept %d)",
+                removed, symbol, len(active_strategies),
+            )
+
         # ── L1 evolution filter: remove strategies the self-improver disabled ──
-        active_strategies = list(config.enabled_strategies)
         if self.self_improver is not None:
             try:
                 disabled = set(self.self_improver.get_disabled_strategies())

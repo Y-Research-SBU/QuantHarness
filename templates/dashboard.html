@@ -83,6 +83,11 @@
       </div>
     </div>
     <div class="flex items-center gap-4 text-sm">
+      <label for="instance-switcher" class="muted text-xs">Instance:</label>
+      <select id="instance-switcher" class="bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded px-2 py-1">
+        <option value="">live (paper_trades.db)</option>
+      </select>
+      <a href="/tournament" class="text-emerald-400 hover:underline text-xs">tournament →</a>
       <span id="last-update" class="muted">—</span>
       <span class="flex items-center gap-2">
         <span id="live-dot" class="pulse-dot offline"></span>
@@ -360,5 +365,36 @@
   </script>
 
   <script src="/static/dashboard.js"></script>
+
+  <script>
+    // ── Tournament instance switcher ──
+    // Populate the dropdown from /api/instances and reload with ?instance=<name>
+    // so all of dashboard.js sees the right scope. dashboard.js may also read
+    // window.__INSTANCE__ to scope its own fetches when present.
+    (function () {
+      const sel = document.getElementById('instance-switcher');
+      if (!sel) return;
+      const params = new URLSearchParams(window.location.search);
+      const current = params.get('instance') || '';
+      window.__INSTANCE__ = current;
+      fetch('/api/instances').then(r => r.json()).then(rows => {
+        if (!Array.isArray(rows)) return;
+        rows.forEach(row => {
+          const opt = document.createElement('option');
+          opt.value = row.name;
+          opt.textContent = row.name + (row.status === 'running' ? ' ●' : ' ○');
+          if (row.name === current) opt.selected = true;
+          sel.appendChild(opt);
+        });
+      }).catch(() => {});
+      sel.addEventListener('change', () => {
+        const v = sel.value;
+        const u = new URL(window.location.href);
+        if (v) u.searchParams.set('instance', v);
+        else u.searchParams.delete('instance');
+        window.location.href = u.toString();
+      });
+    })();
+  </script>
 </body>
 </html>

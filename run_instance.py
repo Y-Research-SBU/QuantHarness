@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from market_config import MARKETS
-from run_continuous import ContinuousRunner
+from run_continuous import ContinuousRunner, _MarketSchedule
 from scanner import MarketScanner
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,11 @@ def load_profile(name: str):
     return module.PROFILE
 
 
+def state_file_path(profile_name: str) -> Path:
+    """Return the path to ``instances/<name>/state.json``."""
+    return INSTANCES_DIR / profile_name / "state.json"
+
+
 def write_state_file(profile_name: str, state: dict) -> None:
     """Write a heartbeat file at ``instances/<name>/state.json``.
 
@@ -80,6 +85,58 @@ def write_state_file(profile_name: str, state: dict) -> None:
         tmp.replace(path)
     except Exception as exc:  # pragma: no cover — best-effort
         logger.warning("failed to write state.json for %s: %s", profile_name, exc)
+
+
+class HeartbeatRunner(ContinuousRunner):
+    """ContinuousRunner that updates instances/<name>/state.json each cycle."""
+
+    profile_name: str = ""
+    db_path_str: str = ""
+    started_at_iso: str = ""
+
+    def _run_one(self, symbol: str, sched: _MarketSchedule, force: bool = False) -> None:  # type: ignore[override]
+        super()._run_one(symbol, sched, force=force)
+        try:
+            self._write_heartbeat()
+        except Exception as exc:  # pragma: no cover
+            logger.debug("heartbeat write failed: %s", exc)
+
+    def _write_heartbeat(self) -> None:
+        if not self.profile_name:
+            return
+        try:
+            engine = self.scanner.engine
+            master = engine.get_master_portfolio() if hasattr(engine, "get_master_portfolio") else None
+            open_positions = engine.get_open_positions() if hasattr(engine, "get_open_positions") else []
+            try:
+                exposure = engine.get_total_exposure() if hasattr(engine, "get_total_exposure") else 0.0
+            except Exception:
+                exposure = 0.0
+            equity = float(master.get("current_balance") or 0.0) + float(exposure or 0.0) if master else 0.0
+            state = {
+                "name": self.profile_name,
+                "pid": os.getpid(),
+                "started_at": self.started_at_iso,
+                "db_path": self.db_path_str,
+                "last_heartbeat": datetime.utcnow().isoformat(),
+                "equity": equity,
+                "realized_pnl": float(master.get("total_pnl") or 0.0) if master else 0.0,
+                "open_positions": len(open_positions),
+                "total_trades": int(master.get("total_trades") or 0) if master else 0,
+                "last_scan": {
+                    sym: {
+                        "total_cycles": s.total_cycles,
+                        "total_signals": s.total_signals,
+                        "total_trades": s.total_trades,
+                        "last_regime": s.last_regime,
+                        "last_error": s.last_error,
+                    }
+                    for sym, s in self._schedules.items()
+                },
+            }
+            write_state_file(self.profile_name, state)
+        except Exception as exc:  # pragma: no cover
+            logger.debug("heartbeat snapshot failed: %s", exc)
 
 
 def resolve_symbols(profile, override: Optional[List[str]] = None) -> List[str]:
@@ -161,17 +218,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         profile=profile,
     )
     symbols = resolve_symbols(profile, args.symbols)
-    runner = ContinuousRunner(
+    started_at_iso = datetime.utcnow().isoformat()
+    runner = HeartbeatRunner(
         scanner=scanner,
         symbols=symbols,
         summary_every_seconds=args.summary_every_minutes * 60,
     )
+    runner.profile_name = profile.name
+    runner.db_path_str = db_path
+    runner.started_at_iso = started_at_iso
     runner.install_signal_handlers()
 
     write_state_file(profile.name, {
         "name": profile.name,
         "pid": os.getpid(),
-        "started_at": datetime.utcnow().isoformat(),
+        "started_at": started_at_iso,
         "db_path": db_path,
         "symbols": symbols,
         "profile": {

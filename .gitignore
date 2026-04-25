@@ -16,6 +16,12 @@ paper_trades.db-wal
 *.db-shm
 *.db-wal
 
+# Tournament instance runtime state (per-profile DBs + heartbeats)
+paper_trades_*.db
+instances/*/state.json
+instances/*/state.json.tmp
+instances/*/overrides.json
+
 # pytest cache
 .pytest_cache/
 .coverage

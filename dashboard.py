@@ -1092,6 +1092,74 @@ def create_app(
             "ws_connected": feed.is_ws_connected(),
         })
 
+    # ------------------------------------------------------------------
+    # Tournament: per-instance discovery + portfolio views
+    # ------------------------------------------------------------------
+
+    @app.route("/api/instances")
+    def api_instances():
+        """List every tournament instance with live status + heartbeat data."""
+        from profile_loader import ProfileLoader
+        loader = ProfileLoader()
+        return jsonify(loader.describe_all())
+
+    @app.route("/api/instance/<name>/portfolio")
+    def api_instance_portfolio(name: str):
+        """Return portfolio overview for a single instance (DB-scoped)."""
+        from profile_loader import ProfileLoader
+        loader = ProfileLoader()
+        try:
+            profile = loader.load(name)
+        except FileNotFoundError:
+            return jsonify({"error": f"unknown instance: {name}"}), 404
+        # Resolve the live DB: prefer state.json's recorded db_path, fall back
+        # to the profile's declared db_path.
+        state = loader.read_state(name) or {}
+        db_path = state.get("db_path") or profile.db_path
+        # Build a portfolio view scoped to that DB. ``build_overview`` already
+        # returns master + per-symbol summaries.
+        try:
+            overview = build_overview(db_path)
+        except Exception as exc:
+            logger.warning("instance portfolio query failed for %s: %s", name, exc)
+            overview = {"error": str(exc)}
+        try:
+            markets = build_market_grid(db_path)
+        except Exception:
+            markets = []
+        try:
+            positions = build_positions_detail(db_path)
+        except Exception:
+            positions = []
+        try:
+            strategies = build_strategy_table(db_path)
+        except Exception:
+            strategies = []
+        try:
+            trades = build_trade_log(db_path, limit=50)
+        except Exception:
+            trades = []
+        return jsonify({
+            "name": name,
+            "db_path": db_path,
+            "overview": overview,
+            "markets": markets,
+            "positions": positions,
+            "strategies": strategies,
+            "trades": trades,
+            "profile": {
+                "position_size_multiplier": profile.position_size_multiplier,
+                "entry_threshold_multiplier": profile.entry_threshold_multiplier,
+                "regime_filter_enabled": profile.regime_filter_enabled,
+                "use_l0_whitelist": profile.use_l0_whitelist,
+                "use_l1_evolution": profile.use_l1_evolution,
+                "asset_categories": profile.asset_categories,
+                "universe": profile.universe,
+                "strategies": profile.strategies,
+                "cell_overrides": [list(c) for c in profile.cell_overrides],
+            },
+        })
+
     @app.route("/health")
     def health():
         feed = app.extensions.get("price_feed")

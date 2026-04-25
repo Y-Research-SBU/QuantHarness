@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from market_config import MARKETS, StrategyType
+from market_config import MARKETS, MarketCategory, MarketConfig, StrategyType
 from scanner import MarketScanner
 
 
@@ -346,3 +346,97 @@ def test_execute_signals_keeps_signals_at_or_above_strength_floor(tmp_db_path):
     ids = scanner.execute_signals([strong])
     # Strong signal passes the filter and sizing succeeds with a 5% stop.
     assert len(ids) == 1
+
+
+# ── L1 evolution filter tests ──
+
+def test_scan_market_filters_disabled_strategies(tmp_db_path, monkeypatch):
+    """Scanner should skip strategies that self_improver marks as disabled."""
+    from unittest.mock import MagicMock, patch
+    import pandas as pd
+    import numpy as np
+
+    scanner = MarketScanner(db_path=tmp_db_path)
+
+    # Set up a mock self_improver that disables "momentum"
+    mock_improver = MagicMock()
+    mock_improver.get_disabled_strategies.return_value = ["momentum", "kronos_divergence"]
+    mock_improver.get_adaptive_params.return_value = {}
+    mock_improver.log_regime.return_value = "trending_up"
+    scanner.self_improver = mock_improver
+
+    # Track which strategies run_all_strategies receives
+    captured_strategies = []
+    original_run_all = None
+    from strategies import run_all_strategies as _orig
+
+    def spy_run_all(df, enabled_strategies=None, **kwargs):
+        captured_strategies.extend(enabled_strategies or [])
+        return []  # no signals
+
+    # Create a config with all strategies enabled including momentum
+    config = MarketConfig(
+        symbol="BTC-USD",
+        display_name="Bitcoin",
+        category=MarketCategory.CRYPTO,
+        timeframes=["4h"],
+        enabled_strategies=[StrategyType.MOMENTUM, StrategyType.KRONOS_MOMENTUM_CONFIRM],
+    )
+
+    # Mock fetch_market_data to return a valid DataFrame
+    fake_df = pd.DataFrame({
+        "open": np.random.random(100),
+        "high": np.random.random(100),
+        "low": np.random.random(100),
+        "close": np.random.random(100),
+        "volume": np.random.random(100) * 1000,
+    })
+
+    with patch("scanner.fetch_market_data", return_value=fake_df), \
+         patch("scanner.run_all_strategies", side_effect=spy_run_all):
+        scanner.scan_market("BTC-USD", config)
+
+    # momentum should have been filtered out, only kronos_momentum_confirm remains
+    strategy_values = [s.value if hasattr(s, 'value') else s for s in captured_strategies]
+    assert "momentum" not in strategy_values, f"momentum should be disabled but got {strategy_values}"
+    assert "kronos_momentum_confirm" in strategy_values
+
+
+def test_scan_market_no_improver_uses_all_strategies(tmp_db_path, monkeypatch):
+    """Without self_improver, scanner should use all config strategies."""
+    from unittest.mock import patch
+    import pandas as pd
+    import numpy as np
+
+    scanner = MarketScanner(db_path=tmp_db_path)
+    scanner.self_improver = None
+
+    captured_strategies = []
+
+    def spy_run_all(df, enabled_strategies=None, **kwargs):
+        captured_strategies.extend(enabled_strategies or [])
+        return []
+
+    config = MarketConfig(
+        symbol="BTC-USD",
+        display_name="Bitcoin",
+        category=MarketCategory.CRYPTO,
+        timeframes=["4h"],
+        enabled_strategies=[StrategyType.MOMENTUM, StrategyType.KRONOS_MOMENTUM_CONFIRM],
+    )
+
+    fake_df = pd.DataFrame({
+        "open": np.random.random(100),
+        "high": np.random.random(100),
+        "low": np.random.random(100),
+        "close": np.random.random(100),
+        "volume": np.random.random(100) * 1000,
+    })
+
+    with patch("scanner.fetch_market_data", return_value=fake_df), \
+         patch("scanner.run_all_strategies", side_effect=spy_run_all):
+        scanner.scan_market("BTC-USD", config)
+
+    strategy_values = [s.value if hasattr(s, 'value') else s for s in captured_strategies]
+    assert "momentum" in strategy_values
+    assert "kronos_momentum_confirm" in strategy_values

@@ -177,13 +177,31 @@ class MarketScanner:
         # for this symbol (typically "4h"). Store the first non-empty frame.
         cycle_df: Optional[pd.DataFrame] = None
 
+        # ── L1 evolution filter: remove strategies the self-improver disabled ──
+        active_strategies = list(config.enabled_strategies)
+        if self.self_improver is not None:
+            try:
+                disabled = set(self.self_improver.get_disabled_strategies())
+                if disabled:
+                    before = len(active_strategies)
+                    active_strategies = [
+                        st for st in active_strategies if st.value not in disabled
+                    ]
+                    if len(active_strategies) < before:
+                        logger.info(
+                            "L1 evolution filter: disabled %s for %s",
+                            disabled, symbol,
+                        )
+            except Exception as exc:
+                logger.debug("get_disabled_strategies failed: %s", exc)
+
         # Pull adaptive params (L2) and current regime (L4) once per symbol so
         # we can tune strategies + attach context to every signal.
         adaptive_by_strategy: Dict[str, Dict[str, float]] = {}
         current_regime: Optional[str] = None
         if self.self_improver is not None:
             try:
-                for st in config.enabled_strategies:
+                for st in active_strategies:
                     adaptive_by_strategy[st.value] = self.self_improver.get_adaptive_params(
                         st.value, symbol
                     )
@@ -226,10 +244,10 @@ class MarketScanner:
                         agent_reports = dict(agent_reports or {})
                         agent_reports["kronos_forecast_data"] = kronos_data
 
-                # Run strategies
+                # Run strategies (using evolution-filtered list)
                 signals = run_all_strategies(
                     df=df,
-                    enabled_strategies=config.enabled_strategies,
+                    enabled_strategies=active_strategies,
                     agent_reports=agent_reports,
                     adaptive_params_by_strategy=adaptive_by_strategy or None,
                 )

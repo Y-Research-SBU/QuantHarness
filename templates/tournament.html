@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QuantAgent — Tournament</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    body { background: #0b0f17; color: #d1d5db; font-family: 'Inter', system-ui, sans-serif; }
+    .card { background: #111827; border: 1px solid #1f2937; }
+    .monospace { font-family: 'JetBrains Mono', 'SF Mono', monospace; }
+    .pos { color: #34d399; }
+    .neg { color: #f87171; }
+    .muted { color: #9ca3af; }
+    th { text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em; color: #9ca3af; }
+    td, th { padding: 0.5rem 0.75rem; }
+    tr.row { border-top: 1px solid #1f2937; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <header class="border-b border-gray-800 px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <span class="text-xl font-bold tracking-wide">
+        <span class="text-emerald-400">Quant</span><span class="text-gray-300">Agent</span>
+        <span class="text-sm muted ml-2">/ Tournament</span>
+      </span>
+      <a href="/" class="text-xs muted hover:text-gray-200">← back to dashboard</a>
+    </div>
+    <div class="text-xs muted" id="tournament-updated">—</div>
+  </header>
+
+  <main class="p-4 md:p-6 max-w-[1600px] mx-auto space-y-6">
+
+    <!-- Leaderboard -->
+    <section class="card rounded-lg p-5">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-sm font-semibold tracking-wider uppercase muted">Leaderboard (7d)</h2>
+        <div class="text-xs muted">Live updates every 30s</div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="text-left">
+            <tr>
+              <th>Instance</th>
+              <th>Status</th>
+              <th class="text-right">Equity</th>
+              <th class="text-right">Realized P&amp;L</th>
+              <th class="text-right">Open</th>
+              <th class="text-right">Trades</th>
+              <th class="text-right">Sharpe(7d)</th>
+              <th class="text-right">Win %</th>
+              <th class="text-right">MDD</th>
+            </tr>
+          </thead>
+          <tbody id="leaderboard-body" class="monospace text-sm">
+            <tr><td colspan="9" class="muted">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Equity overlay -->
+    <section class="card rounded-lg p-5">
+      <h2 class="text-sm font-semibold tracking-wider uppercase muted mb-4">Equity Curves</h2>
+      <div class="h-[420px]"><canvas id="equity-chart"></canvas></div>
+    </section>
+
+    <!-- Strategy attribution -->
+    <section class="card rounded-lg p-5">
+      <h2 class="text-sm font-semibold tracking-wider uppercase muted mb-4">Strategy Attribution (7d, by instance)</h2>
+      <div id="attribution-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+    </section>
+
+  </main>
+
+  <script>
+    const fmtMoney = v => v == null ? '—' : '$' + Number(v).toLocaleString('en-US', {maximumFractionDigits: 2});
+    const fmtPct = v => v == null ? '—' : (Number(v) * 100).toFixed(1) + '%';
+    const fmtNum = (v, d = 2) => v == null ? '—' : Number(v).toFixed(d);
+
+    let equityChart = null;
+    const palette = ['#34d399', '#60a5fa', '#fbbf24', '#f472b6', '#a78bfa', '#f87171', '#22d3ee'];
+
+    function renderLeaderboard(rows) {
+      const body = document.getElementById('leaderboard-body');
+      if (!rows || !rows.length) {
+        body.innerHTML = '<tr><td colspan="9" class="muted">No instances detected.</td></tr>';
+        return;
+      }
+      // Sort by equity desc.
+      rows = rows.slice().sort((a, b) => (b.equity ?? 0) - (a.equity ?? 0));
+      body.innerHTML = rows.map(r => {
+        const pnlCls = (r.realized_pnl ?? 0) >= 0 ? 'pos' : 'neg';
+        const dot = r.status === 'running' ? '<span class="text-emerald-400">●</span>' : '<span class="muted">○</span>';
+        return `<tr class="row">
+          <td><a href="/?instance=${encodeURIComponent(r.name)}" class="text-emerald-400 hover:underline">${r.name}</a></td>
+          <td>${dot} <span class="muted">${r.status || '—'}</span></td>
+          <td class="text-right">${fmtMoney(r.equity)}</td>
+          <td class="text-right ${pnlCls}">${fmtMoney(r.realized_pnl)}</td>
+          <td class="text-right">${r.open_positions ?? '—'}</td>
+          <td class="text-right">${r.total_trades ?? '—'}</td>
+          <td class="text-right">${fmtNum(r.sharpe_7d, 2)}</td>
+          <td class="text-right">${fmtPct(r.win_rate_7d)}</td>
+          <td class="text-right">${fmtPct(r.mdd)}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    function renderEquityChart(rows) {
+      const ctx = document.getElementById('equity-chart').getContext('2d');
+      const datasets = rows.map((r, i) => ({
+        label: r.name,
+        data: (r.equity_series || []).map(p => ({x: p.t, y: p.equity})),
+        borderColor: palette[i % palette.length],
+        backgroundColor: palette[i % palette.length] + '22',
+        tension: 0.2,
+        pointRadius: 0,
+        borderWidth: 2,
+      }));
+      if (equityChart) {
+        equityChart.data.datasets = datasets;
+        equityChart.update();
+        return;
+      }
+      equityChart = new Chart(ctx, {
+        type: 'line',
+        data: {datasets},
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          parsing: false,
+          plugins: {legend: {labels: {color: '#d1d5db'}}},
+          scales: {
+            x: {type: 'category', ticks: {color: '#9ca3af', maxTicksLimit: 10}, grid: {color: '#1f2937'}},
+            y: {ticks: {color: '#9ca3af'}, grid: {color: '#1f2937'}},
+          },
+        },
+      });
+    }
+
+    function renderAttribution(rows) {
+      const grid = document.getElementById('attribution-grid');
+      grid.innerHTML = rows.map(r => {
+        const items = (r.attribution || []).slice().sort((a, b) => b.pnl - a.pnl);
+        const list = items.length
+          ? items.map(a => {
+              const cls = a.pnl >= 0 ? 'pos' : 'neg';
+              return `<div class="flex justify-between text-xs"><span class="muted">${a.strategy}</span><span class="${cls} monospace">${fmtMoney(a.pnl)}</span></div>`;
+            }).join('')
+          : '<div class="text-xs muted">No closed trades in last 7 days.</div>';
+        return `<div class="card rounded-lg p-3">
+          <div class="text-sm font-semibold mb-2">${r.name}</div>
+          ${list}
+        </div>`;
+      }).join('');
+    }
+
+    function applyPayload(payload) {
+      if (!payload || !payload.instances) return;
+      const ts = payload.generated_at || new Date().toISOString();
+      document.getElementById('tournament-updated').textContent = 'updated ' + ts;
+      renderLeaderboard(payload.instances);
+      renderEquityChart(payload.instances);
+      renderAttribution(payload.instances);
+    }
+
+    function fetchOnce() {
+      fetch('/api/tournament').then(r => r.json()).then(applyPayload).catch(() => {});
+    }
+
+    fetchOnce();
+    setInterval(fetchOnce, 30000);
+
+    // Live socket.io updates (when available).
+    try {
+      const sock = io();
+      sock.on('tournament_update', applyPayload);
+    } catch (e) { /* socket optional */ }
+  </script>
+</body>
+</html>

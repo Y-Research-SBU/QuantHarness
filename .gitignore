@@ -21,6 +21,7 @@ paper_trades_*.db
 instances/*/state.json
 instances/*/state.json.tmp
 instances/*/overrides.json
+tournament_log.json
 
 # pytest cache
 .pytest_cache/

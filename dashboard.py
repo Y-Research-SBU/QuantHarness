@@ -548,6 +548,142 @@ def _compute_unrealized_pnl(db_path: str) -> Dict[str, float]:
     return unrealized
 
 
+# ════════════════════════════════════════════════════════════════════
+# Tournament aggregation
+# ════════════════════════════════════════════════════════════════════
+
+import math
+
+
+def _query_master_equity_series(db_path: str, days: int = 14) -> List[Dict[str, Any]]:
+    """Return master portfolio equity points within the last ``days``."""
+    if not Path(db_path).exists():
+        return []
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT snapshot_time, balance FROM portfolio_snapshots "
+            "WHERE symbol = '__MASTER__' "
+            "AND snapshot_time >= datetime('now', ?) "
+            "ORDER BY snapshot_time ASC",
+            (f"-{int(days)} day",),
+        ).fetchall()
+    return [{"t": r["snapshot_time"], "equity": float(r["balance"])} for r in rows]
+
+
+def _compute_sharpe(returns: List[float]) -> float:
+    """Annualised Sharpe given a list of period returns. Returns 0 on degenerate input."""
+    if len(returns) < 2:
+        return 0.0
+    n = len(returns)
+    mean = sum(returns) / n
+    var = sum((r - mean) ** 2 for r in returns) / (n - 1) if n > 1 else 0.0
+    std = math.sqrt(var) if var > 0 else 0.0
+    if std == 0:
+        return 0.0
+    # Snapshots roughly hourly; annualise by sqrt(252*24).
+    return float((mean / std) * math.sqrt(252 * 24))
+
+
+def _compute_max_drawdown(equity: List[float]) -> float:
+    if not equity:
+        return 0.0
+    peak = equity[0]
+    mdd = 0.0
+    for e in equity:
+        if e > peak:
+            peak = e
+        if peak > 0:
+            dd = (peak - e) / peak
+            if dd > mdd:
+                mdd = dd
+    return float(mdd)
+
+
+def _query_strategy_attribution(db_path: str, days: int = 7) -> List[Dict[str, Any]]:
+    """Sum closed-trade P&L by strategy in the last ``days``."""
+    if not Path(db_path).exists():
+        return []
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT strategy, COUNT(*) AS trades, "
+            "       SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS wins, "
+            "       SUM(pnl) AS pnl "
+            "FROM trades WHERE status IN ('CLOSED','STOPPED') "
+            "AND exit_time >= datetime('now', ?) GROUP BY strategy",
+            (f"-{int(days)} day",),
+        ).fetchall()
+    return [
+        {
+            "strategy": r["strategy"],
+            "trades": int(r["trades"] or 0),
+            "wins": int(r["wins"] or 0),
+            "pnl": float(r["pnl"] or 0.0),
+        }
+        for r in rows
+    ]
+
+
+def build_tournament_leaderboard(loader=None, days: int = 7) -> Dict[str, Any]:
+    """Aggregate every instance for the /tournament view.
+
+    Returns a dict with::
+
+        {
+          "generated_at": iso,
+          "days": 7,
+          "instances": [
+             {name, db_path, status, equity, realized_pnl, open_positions,
+              total_trades, sharpe_7d, win_rate_7d, mdd, attribution: [...],
+              equity_series: [{t, equity}, ...]},
+             ...
+          ]
+        }
+    """
+    if loader is None:
+        from profile_loader import ProfileLoader
+        loader = ProfileLoader()
+    rows = loader.describe_all()
+    instances = []
+    for row in rows:
+        db_path = row.get("db_path") or ""
+        equity_series = _query_master_equity_series(db_path, days=days) if db_path else []
+        eq_values = [pt["equity"] for pt in equity_series]
+        # Hourly returns from snapshots
+        rets = []
+        for i in range(1, len(eq_values)):
+            prev = eq_values[i - 1]
+            cur = eq_values[i]
+            if prev > 0:
+                rets.append((cur - prev) / prev)
+        sharpe = _compute_sharpe(rets)
+        mdd = _compute_max_drawdown(eq_values)
+        attribution = _query_strategy_attribution(db_path, days=days) if db_path else []
+        # Win rate 7d from attribution rollup
+        total_trades = sum(a["trades"] for a in attribution)
+        total_wins = sum(a["wins"] for a in attribution)
+        win_rate = (total_wins / total_trades) if total_trades else None
+
+        instances.append({
+            "name": row["name"],
+            "status": row.get("status"),
+            "db_path": db_path,
+            "equity": row.get("equity"),
+            "realized_pnl": row.get("realized_pnl"),
+            "open_positions": row.get("open_positions"),
+            "total_trades": row.get("total_trades"),
+            "sharpe_7d": round(sharpe, 3),
+            "win_rate_7d": round(win_rate, 3) if win_rate is not None else None,
+            "mdd": round(mdd, 4),
+            "attribution": attribution,
+            "equity_series": equity_series,
+        })
+    return {
+        "generated_at": datetime.utcnow().isoformat(),
+        "days": days,
+        "instances": instances,
+    }
+
+
 def build_overview(db_path: str) -> Dict[str, Any]:
     master = _query_master_portfolio(db_path)
     open_positions = _query_trades(db_path, limit=1000, status="OPEN")
@@ -1022,6 +1158,30 @@ def create_app(
         app.extensions["price_feed"] = price_feed
         price_feed.start()
 
+    # Tournament: push leaderboard every 30s when socketio is available.
+    # Disabled in TESTING mode and when DASHBOARD_DISABLE_TOURNAMENT_FEED=1.
+    tournament_feed_enabled = (
+        socketio is not None
+        and not app.config.get("TESTING")
+        and os.environ.get("DASHBOARD_DISABLE_TOURNAMENT_FEED") != "1"
+    )
+    if tournament_feed_enabled:
+        import threading
+
+        def _tournament_pusher():
+            while True:
+                try:
+                    payload = build_tournament_leaderboard(days=7)
+                    if socketio is not None:
+                        socketio.emit("tournament_update", payload)
+                except Exception:
+                    logger.exception("tournament_pusher emit failed")
+                time.sleep(30)
+
+        t = threading.Thread(target=_tournament_pusher, daemon=True, name="tournament-pusher")
+        t.start()
+        app.extensions["tournament_thread"] = t
+
     @app.route("/")
     def index():
         return render_template("dashboard.html")
@@ -1102,6 +1262,15 @@ def create_app(
         from profile_loader import ProfileLoader
         loader = ProfileLoader()
         return jsonify(loader.describe_all())
+
+    @app.route("/tournament")
+    def tournament_view():
+        return render_template("tournament.html")
+
+    @app.route("/api/tournament")
+    def api_tournament():
+        days = int(flask_request.args.get("days", 7))
+        return jsonify(build_tournament_leaderboard(days=days))
 
     @app.route("/api/instance/<name>/portfolio")
     def api_instance_portfolio(name: str):

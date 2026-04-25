@@ -3,6 +3,7 @@ flask-socketio
 python-socketio
 websocket-client
 eventlet
+redis
 yfinance
 pandas
 numpy

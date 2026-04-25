@@ -13,6 +13,11 @@ import yfinance as yf
 
 from market_config import MARKETS, MarketConfig
 
+try:
+    from data_cache import get_cache
+except Exception:  # pragma: no cover — cache is optional
+    get_cache = None  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 # yfinance interval mapping
@@ -58,21 +63,43 @@ def fetch_market_data(
     bars: Optional[int] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    use_cache: bool = True,
 ) -> pd.DataFrame:
     """
     Fetch OHLCV data for a single market.
-    
+
+    Reads from the shared :class:`OHLCVCache` when available (Redis-backed)
+    and falls back to a direct yfinance call on miss / when Redis is down.
+
     Args:
         symbol: yfinance symbol (e.g., "BTC-USD")
         interval: Time interval (e.g., "4h", "1d")
         bars: Number of bars to fetch (overrides date range)
         start_date: Start of date range
         end_date: End of date range (defaults to now)
-    
+        use_cache: If False, bypass the cache entirely (read AND write).
+
     Returns:
         DataFrame with columns: Datetime, Open, High, Low, Close, Volume
     """
     yf_interval = INTERVAL_MAP.get(interval, interval)
+
+    # Cache lookup. We only consult the cache when the caller didn't
+    # specify a custom date window — those queries are not what the
+    # daemon populates.
+    cache = None
+    cache_eligible = (
+        use_cache and start_date is None and end_date is None and get_cache is not None
+    )
+    if cache_eligible:
+        try:
+            cache = get_cache()
+            if cache.is_connected():
+                cached = cache.get(symbol, interval, bars)
+                if cached is not None and not cached.empty:
+                    return cached
+        except Exception as exc:
+            logger.debug("cache read failed for %s/%s: %s", symbol, interval, exc)
     
     if end_date is None:
         end_date = datetime.now()
@@ -140,9 +167,16 @@ def fetch_market_data(
         # Limit to requested bars
         if bars and len(df) > bars:
             df = df.tail(bars).reset_index(drop=True)
-        
+
+        # Populate the cache (best-effort; errors are swallowed).
+        if cache_eligible and cache is not None and cache.is_connected():
+            try:
+                cache.set(symbol, interval, df, bars)
+            except Exception as exc:
+                logger.debug("cache write failed for %s/%s: %s", symbol, interval, exc)
+
         return df
-    
+
     except Exception as e:
         logger.error(f"Error fetching {symbol} ({interval}): {e}")
         return pd.DataFrame()

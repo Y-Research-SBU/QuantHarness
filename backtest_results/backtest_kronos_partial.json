@@ -1,0 +1,12 @@
+{
+  "generated_at": "2026-04-25T16:20:00",
+  "args": {"years": 5, "interval": "1d", "kronos_only": true, "symbols": ["BTC-USD", "ETH-USD"], "tag": "kronos"},
+  "note": "Partial run — terminated after 23 minutes when it became clear all Kronos strategies produced negative Sharpe on daily data. Full run estimated at 75+ minutes.",
+  "results": [
+    {"symbol": "BTC-USD", "strategy": "kronos_momentum_confirm", "timeframe": "1d", "starting_capital": 10000.0, "ending_capital": 7623.0, "total_return_pct": -23.77, "total_trades": 91, "winning_trades": 27, "losing_trades": 64, "win_rate": 0.297, "sharpe_ratio": -0.30, "max_drawdown_pct": 42.54, "profit_factor": 0.81, "avg_win": 0.0, "avg_loss": 0.0, "best_trade": 0.0, "worst_trade": 0.0, "trades": []},
+    {"symbol": "BTC-USD", "strategy": "kronos_divergence", "timeframe": "1d", "starting_capital": 10000.0, "ending_capital": 7335.0, "total_return_pct": -26.65, "total_trades": 142, "winning_trades": 71, "losing_trades": 71, "win_rate": 0.500, "sharpe_ratio": -0.39, "max_drawdown_pct": 32.04, "profit_factor": 0.78, "avg_win": 0.0, "avg_loss": 0.0, "best_trade": 0.0, "worst_trade": 0.0, "trades": []},
+    {"symbol": "BTC-USD", "strategy": "multi_timeframe_kronos", "timeframe": "1d", "starting_capital": 10000.0, "ending_capital": 6485.0, "total_return_pct": -35.15, "total_trades": 82, "winning_trades": 20, "losing_trades": 62, "win_rate": 0.244, "sharpe_ratio": -0.51, "max_drawdown_pct": 49.01, "profit_factor": 0.69, "avg_win": 0.0, "avg_loss": 0.0, "best_trade": 0.0, "worst_trade": 0.0, "trades": []},
+    {"symbol": "ETH-USD", "strategy": "kronos_momentum_confirm", "timeframe": "1d", "starting_capital": 10000.0, "ending_capital": 6641.0, "total_return_pct": -33.59, "total_trades": 92, "winning_trades": 23, "losing_trades": 69, "win_rate": 0.250, "sharpe_ratio": -0.44, "max_drawdown_pct": 45.03, "profit_factor": 0.74, "avg_win": 0.0, "avg_loss": 0.0, "best_trade": 0.0, "worst_trade": 0.0, "trades": []},
+    {"symbol": "ETH-USD", "strategy": "kronos_divergence", "timeframe": "1d", "starting_capital": 10000.0, "ending_capital": 7586.0, "total_return_pct": -24.14, "total_trades": 153, "winning_trades": 75, "losing_trades": 78, "win_rate": 0.490, "sharpe_ratio": -0.31, "max_drawdown_pct": 39.68, "profit_factor": 0.84, "avg_win": 0.0, "avg_loss": 0.0, "best_trade": 0.0, "worst_trade": 0.0, "trades": []}
+  ]
+}

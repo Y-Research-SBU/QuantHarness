@@ -487,6 +487,7 @@ def test_check_stops_boundary(
     tmp_db_path, direction, entry, stop, tp, price, expect_close, expect_status
 ):
     engine = PaperTradingEngine(db_path=tmp_db_path)
+    engine.MIN_HOLD_MINUTES = 0
     sig = _sig(direction=direction, entry=entry, stop=stop, tp=tp)
     pos = _pos(size=200.0, qty=2.0, stop=stop, tp=tp)
     engine.execute_trade(sig, pos)

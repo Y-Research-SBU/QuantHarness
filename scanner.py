@@ -25,7 +25,12 @@ logger = logging.getLogger(__name__)
 
 
 # Minimum meta-model probability for a signal to pass L3 quality gating.
-SIGNAL_QUALITY_THRESHOLD = 0.35
+SIGNAL_QUALITY_THRESHOLD = 0.45
+
+# Minimum raw strategy strength required before any L1/L3/L4 filters run.
+# Drops weak signals (e.g. barely-agreeing multi-factor, low-volume crossovers)
+# that historically produced flat/losing trades.
+MIN_SIGNAL_STRENGTH = 0.4
 
 
 class MarketScanner:
@@ -373,6 +378,14 @@ class MarketScanner:
                 logger.debug("Skipping disabled strategy signal: %s %s", strat, s.symbol)
                 continue
 
+            # Raw-strength floor: skip weak setups even before L1/L3/L4 weighting.
+            if float(s.strength or 0.0) < MIN_SIGNAL_STRENGTH:
+                logger.debug(
+                    "Skipping weak signal (strength %.2f < %.2f): %s %s",
+                    float(s.strength or 0.0), MIN_SIGNAL_STRENGTH, strat, s.symbol,
+                )
+                continue
+
             # Trend-conflict filter: never SHORT a trending-up market or
             # LONG a trending-down market. These counter-trend trades have
             # a terrible hit rate (the INJ-USD problem).
@@ -450,6 +463,50 @@ class MarketScanner:
     def check_all_stops(self, current_prices: Dict[str, float]) -> List[Dict]:
         """Check all open positions for stop-loss/take-profit."""
         return self.engine.check_stops(current_prices)
+
+    def _close_orphaned_positions(
+        self,
+        active_symbols: List[str],
+        current_prices: Dict[str, float],
+    ) -> List[Dict]:
+        """Force-close open positions whose symbol was removed from MARKETS.
+
+        When a symbol is removed from the market config (e.g. delisted or
+        chronic loser), existing open positions become orphaned because
+        ``run_scan_cycle`` no longer fetches their price.  This method
+        detects those orphans and closes them at the last known price or
+        at entry price if no price is available.
+        """
+        open_positions = self.engine.get_open_positions()
+        active_set = set(active_symbols)
+        closed = []
+        for trade in open_positions:
+            sym = trade["symbol"]
+            if sym in active_set:
+                continue
+            # Orphan found — try to fetch a live price for a fair close.
+            close_price = current_prices.get(sym)
+            if close_price is None:
+                try:
+                    from data_fetcher import fetch_market_data
+                    df = fetch_market_data(sym, "1d", bars=2)
+                    if not df.empty:
+                        close_price = float(df["Close"].iloc[-1])
+                except Exception:
+                    pass
+            if close_price is None:
+                close_price = float(trade.get("entry_price", 0))
+            logger.warning(
+                "Orphan position detected: %s (id=%s) not in active MARKETS — "
+                "force-closing at %.4f",
+                sym, trade["id"], close_price,
+            )
+            result = self.engine.close_trade(
+                trade["id"], close_price, reason="orphan_cleanup"
+            )
+            if result:
+                closed.append(result)
+        return closed
     
     def run_scan_cycle(
         self,
@@ -500,6 +557,19 @@ class MarketScanner:
 
         closed = self.check_all_stops(current_prices)
         results["stops_triggered"] = len(closed)
+
+        # ── Orphan detection: force-close positions for symbols removed from MARKETS ─
+        # Always check against the *full* MARKETS dict, not the per-cycle
+        # ``symbols`` list (which may be a single-symbol slice from the
+        # continuous runner).  Using the filtered list caused every open
+        # position on a *different* symbol to be force-closed as orphan.
+        try:
+            all_known_symbols = list(MARKETS.keys())
+            orphan_closed = self._close_orphaned_positions(all_known_symbols, current_prices)
+            results["stops_triggered"] += len(orphan_closed)
+            closed.extend(orphan_closed)
+        except Exception as exc:
+            logger.warning("orphan position cleanup failed (non-fatal): %s", exc)
 
         # Mark-to-market: refresh unrealised P&L on still-open positions so the
         # dashboard and analytics see live numbers (not 0 until close).

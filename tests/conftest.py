@@ -157,6 +157,7 @@ def engine(tmp_db_path):
     from paper_trading import PaperTradingEngine
     engine = PaperTradingEngine(db_path=tmp_db_path)
     engine.COOLDOWN_MINUTES = 0
+    engine.MIN_HOLD_MINUTES = 0
     return engine
 
 

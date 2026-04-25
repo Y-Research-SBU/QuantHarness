@@ -24,6 +24,10 @@ class StrategyType(str, Enum):
     KRONOS_MOMENTUM_CONFIRM = "kronos_momentum_confirm"
     KRONOS_DIVERGENCE = "kronos_divergence"
     MULTI_TIMEFRAME_KRONOS = "multi_timeframe_kronos"
+    # Classical technical strategies (added to replace disabled ones)
+    VWAP_REVERSION = "vwap_reversion"
+    BB_SQUEEZE = "bb_squeeze"
+    EMA_CROSSOVER = "ema_crossover"
 
 
 @dataclass
@@ -49,6 +53,9 @@ _CRYPTO_DEFAULT_STRATEGIES = [
     StrategyType.KRONOS_MOMENTUM_CONFIRM,
     # StrategyType.KRONOS_DIVERGENCE,  # disabled: 0% win rate over 8 trades, sharpe -4.64 (2026-04-24)
     StrategyType.MULTI_TIMEFRAME_KRONOS,
+    StrategyType.VWAP_REVERSION,
+    StrategyType.BB_SQUEEZE,
+    StrategyType.EMA_CROSSOVER,
 ]
 
 

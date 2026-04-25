@@ -88,6 +88,51 @@ class Signal:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+def _compute_vwap(df: pd.DataFrame) -> float:
+    """Volume-weighted average price across the supplied frame."""
+    if "Volume" not in df.columns or len(df) == 0:
+        return float(df["Close"].iloc[-1]) if len(df) else 0.0
+    typical = (df["High"].values + df["Low"].values + df["Close"].values) / 3.0
+    vol = df["Volume"].values.astype(float)
+    vol_sum = float(np.sum(vol))
+    if vol_sum <= 0:
+        return float(np.mean(typical))
+    return float(np.sum(typical * vol) / vol_sum)
+
+
+def _compute_bollinger_bands(
+    close: np.ndarray, period: int = 20, num_std: float = 2.0
+) -> Tuple[float, float, float, float]:
+    """Return (upper, middle, lower, width) for the most recent bar."""
+    if len(close) < period:
+        price = float(close[-1]) if len(close) else 0.0
+        return price, price, price, 0.0
+    window = close[-period:]
+    middle = float(np.mean(window))
+    std = float(np.std(window))
+    upper = middle + num_std * std
+    lower = middle - num_std * std
+    width = upper - lower
+    return upper, middle, lower, width
+
+
+def _rolling_bb_widths(
+    close: np.ndarray, lookback: int, period: int = 20, num_std: float = 2.0
+) -> np.ndarray:
+    """Compute BB width for each of the last ``lookback`` bars."""
+    widths: List[float] = []
+    if len(close) < period + 1:
+        return np.array(widths, dtype=float)
+    start = max(0, len(close) - lookback)
+    for i in range(start, len(close)):
+        window = close[max(0, i - period + 1): i + 1]
+        if len(window) < period:
+            continue
+        std = float(np.std(window))
+        widths.append(2.0 * num_std * std)
+    return np.array(widths, dtype=float)
+
+
 class BaseStrategy(ABC):
     """Abstract base class for all trading strategies."""
 
@@ -771,12 +816,17 @@ class KronosMomentumConfirmStrategy(BaseStrategy):
         "shooting star",
     )
 
+    # Minimum risk:reward ratio required to take a Kronos-confirmed trade.
+    # Raised from implicit 1.0 to 1.5 — cuts low-conviction setups that were
+    # tanking win rate even though magnitude/confidence gates passed.
+    MIN_RR = 1.5
+
     def __init__(
         self,
-        min_pct: float = 2.0,
+        min_pct: float = 3.0,
         rsi_max: float = 70.0,
         rsi_min: float = 30.0,
-        min_confidence: float = 0.3,
+        min_confidence: float = 0.5,
         kronos_runner: Optional[Callable] = None,
     ):
         super().__init__(StrategyType.KRONOS_MOMENTUM_CONFIRM)
@@ -863,6 +913,8 @@ class KronosMomentumConfirmStrategy(BaseStrategy):
             stop_loss = current_price - sl_mult * atr
             take_profit = current_price + max(tp_mult * atr, current_price * magnitude / 100.0)
             rr = (take_profit - current_price) / max(current_price - stop_loss, 1e-9)
+            if rr < self.MIN_RR:
+                return None
             strength = float(np.clip(0.5 * confidence + 0.5 * min(1.0, magnitude / 5.0), 0.0, 1.0))
             return Signal(
                 direction="LONG",
@@ -886,6 +938,8 @@ class KronosMomentumConfirmStrategy(BaseStrategy):
             stop_loss = current_price + sl_mult * atr
             take_profit = current_price - max(tp_mult * atr, current_price * abs(magnitude) / 100.0)
             rr = (current_price - take_profit) / max(stop_loss - current_price, 1e-9)
+            if rr < self.MIN_RR:
+                return None
             strength = float(
                 np.clip(0.5 * confidence + 0.5 * min(1.0, abs(magnitude) / 5.0), 0.0, 1.0)
             )
@@ -1158,6 +1212,359 @@ class MultiTimeframeKronosStrategy(BaseStrategy):
         )
 
 
+class VWAPReversionStrategy(BaseStrategy):
+    """
+    VWAP mean-reversion strategy.
+
+    LONG when price sits ≥ ``vwap_band_pct`` below VWAP AND RSI < ``rsi_oversold``
+    (oversold at a discount to volume-weighted fair value).
+    SHORT when price sits ≥ ``vwap_band_pct`` above VWAP AND RSI > ``rsi_overbought``
+    (overbought at a premium).
+
+    Stop: 1.5x ATR from entry. Target: VWAP (mean reversion goal).
+    Works best on intraday frames (5m/15m/1h/4h) where VWAP carries information.
+    """
+
+    def __init__(
+        self,
+        vwap_band_pct: float = 0.02,   # 2% deviation from VWAP
+        rsi_overbought: float = 60.0,
+        rsi_oversold: float = 40.0,
+        sl_atr_mult: float = 1.5,
+    ):
+        super().__init__(StrategyType.VWAP_REVERSION)
+        self.vwap_band_pct = vwap_band_pct
+        self.rsi_overbought = rsi_overbought
+        self.rsi_oversold = rsi_oversold
+        self.sl_atr_mult = sl_atr_mult
+
+    def generate_signal(
+        self,
+        df: pd.DataFrame,
+        indicator_data: Optional[Dict] = None,
+        agent_reports: Optional[Dict[str, str]] = None,
+        adaptive_params: Optional[Dict[str, float]] = None,
+    ) -> Optional[Signal]:
+        if len(df) < 20 or "Volume" not in df.columns:
+            return None
+
+        indicators = indicator_data or self._compute_indicators(df)
+        current_price = float(df["Close"].iloc[-1])
+        rsi = float(indicators.get("rsi", 50.0))
+        atr = float(indicators.get("atr", current_price * 0.02))
+        vwap = _compute_vwap(df)
+        if vwap <= 0:
+            return None
+
+        deviation = (current_price - vwap) / vwap  # positive = above VWAP
+        sl_mult = self.sl_atr_mult
+
+        # LONG: price is well below VWAP and RSI confirms oversold.
+        if deviation <= -self.vwap_band_pct and rsi < self.rsi_oversold:
+            stop_loss = current_price - sl_mult * atr
+            take_profit = vwap
+            if take_profit <= current_price:
+                return None
+            rr = (take_profit - current_price) / max(current_price - stop_loss, 1e-9)
+            strength = float(
+                np.clip(0.4 + 0.3 * min(1.0, abs(deviation) / 0.05)
+                        + 0.3 * min(1.0, (self.rsi_oversold - rsi) / 20.0), 0.0, 1.0)
+            )
+            return Signal(
+                direction="LONG",
+                strength=strength,
+                strategy=self.strategy_type,
+                symbol=df.attrs.get("symbol", "UNKNOWN"),
+                timeframe=df.attrs.get("timeframe", "1h"),
+                entry_price=current_price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                risk_reward_ratio=rr,
+                reasoning=(
+                    f"VWAP Reversion LONG: price {current_price:.4f} is "
+                    f"{deviation * 100:.2f}% below VWAP {vwap:.4f}, RSI={rsi:.1f} < {self.rsi_oversold}."
+                ),
+                metadata={**indicators, "vwap": vwap, "vwap_deviation": deviation},
+            )
+
+        # SHORT: price well above VWAP and RSI confirms overbought.
+        if deviation >= self.vwap_band_pct and rsi > self.rsi_overbought:
+            stop_loss = current_price + sl_mult * atr
+            take_profit = vwap
+            if take_profit >= current_price:
+                return None
+            rr = (current_price - take_profit) / max(stop_loss - current_price, 1e-9)
+            strength = float(
+                np.clip(0.4 + 0.3 * min(1.0, deviation / 0.05)
+                        + 0.3 * min(1.0, (rsi - self.rsi_overbought) / 20.0), 0.0, 1.0)
+            )
+            return Signal(
+                direction="SHORT",
+                strength=strength,
+                strategy=self.strategy_type,
+                symbol=df.attrs.get("symbol", "UNKNOWN"),
+                timeframe=df.attrs.get("timeframe", "1h"),
+                entry_price=current_price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                risk_reward_ratio=rr,
+                reasoning=(
+                    f"VWAP Reversion SHORT: price {current_price:.4f} is "
+                    f"{deviation * 100:.2f}% above VWAP {vwap:.4f}, RSI={rsi:.1f} > {self.rsi_overbought}."
+                ),
+                metadata={**indicators, "vwap": vwap, "vwap_deviation": deviation},
+            )
+
+        return None
+
+
+class BollingerBandSqueezeStrategy(BaseStrategy):
+    """
+    Bollinger-Band squeeze breakout.
+
+    Detect a low-vol regime (band width in the bottom 20th percentile over the
+    last 50 bars), then wait for the squeeze to release and trade the breakout
+    direction through the upper or lower band.
+
+    Stop: opposite band at entry. Target: 2x the current band width from entry.
+    """
+
+    LOOKBACK = 50
+    PERCENTILE = 20.0  # width must sit at or below this pct of the recent distribution
+
+    def __init__(self, period: int = 20, num_std: float = 2.0):
+        super().__init__(StrategyType.BB_SQUEEZE)
+        self.period = period
+        self.num_std = num_std
+
+    def generate_signal(
+        self,
+        df: pd.DataFrame,
+        indicator_data: Optional[Dict] = None,
+        agent_reports: Optional[Dict[str, str]] = None,
+        adaptive_params: Optional[Dict[str, float]] = None,
+    ) -> Optional[Signal]:
+        if len(df) < self.LOOKBACK + self.period:
+            return None
+
+        close = df["Close"].values
+        indicators = indicator_data or self._compute_indicators(df)
+
+        widths = _rolling_bb_widths(close, self.LOOKBACK, self.period, self.num_std)
+        if len(widths) < 10:
+            return None
+
+        prev_width = float(widths[-2])
+        curr_width = float(widths[-1])
+        threshold = float(np.percentile(widths[:-1], self.PERCENTILE))
+
+        # Squeeze: the *previous* bar had width in the bottom 20th percentile,
+        # and the current bar shows expansion (width increasing).
+        if prev_width > threshold or curr_width <= prev_width:
+            return None
+
+        upper, middle, lower, _ = _compute_bollinger_bands(
+            close, self.period, self.num_std
+        )
+        current_price = float(close[-1])
+
+        # LONG breakout: price punches above the upper band.
+        if current_price > upper:
+            stop_loss = lower
+            if stop_loss >= current_price:
+                return None
+            band_width = upper - lower
+            take_profit = current_price + 2.0 * band_width
+            rr = (take_profit - current_price) / max(current_price - stop_loss, 1e-9)
+            expansion_ratio = curr_width / prev_width if prev_width > 0 else 1.0
+            strength = float(np.clip(0.5 + 0.25 * min(1.0, expansion_ratio - 1.0), 0.0, 1.0))
+            return Signal(
+                direction="LONG",
+                strength=strength,
+                strategy=self.strategy_type,
+                symbol=df.attrs.get("symbol", "UNKNOWN"),
+                timeframe=df.attrs.get("timeframe", "1h"),
+                entry_price=current_price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                risk_reward_ratio=rr,
+                reasoning=(
+                    f"BB Squeeze LONG breakout: prev width {prev_width:.4f} ≤ "
+                    f"p{self.PERCENTILE:.0f}={threshold:.4f}, curr {curr_width:.4f} > prev. "
+                    f"Price {current_price:.4f} > upper {upper:.4f}."
+                ),
+                metadata={**indicators, "bb_upper": upper, "bb_middle": middle,
+                          "bb_lower": lower, "bb_width": curr_width,
+                          "bb_prev_width": prev_width},
+            )
+
+        # SHORT breakout: price breaks below the lower band.
+        if current_price < lower:
+            stop_loss = upper
+            if stop_loss <= current_price:
+                return None
+            band_width = upper - lower
+            take_profit = current_price - 2.0 * band_width
+            if take_profit <= 0:
+                return None
+            rr = (current_price - take_profit) / max(stop_loss - current_price, 1e-9)
+            expansion_ratio = curr_width / prev_width if prev_width > 0 else 1.0
+            strength = float(np.clip(0.5 + 0.25 * min(1.0, expansion_ratio - 1.0), 0.0, 1.0))
+            return Signal(
+                direction="SHORT",
+                strength=strength,
+                strategy=self.strategy_type,
+                symbol=df.attrs.get("symbol", "UNKNOWN"),
+                timeframe=df.attrs.get("timeframe", "1h"),
+                entry_price=current_price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                risk_reward_ratio=rr,
+                reasoning=(
+                    f"BB Squeeze SHORT breakout: prev width {prev_width:.4f} ≤ "
+                    f"p{self.PERCENTILE:.0f}={threshold:.4f}, curr {curr_width:.4f} > prev. "
+                    f"Price {current_price:.4f} < lower {lower:.4f}."
+                ),
+                metadata={**indicators, "bb_upper": upper, "bb_middle": middle,
+                          "bb_lower": lower, "bb_width": curr_width,
+                          "bb_prev_width": prev_width},
+            )
+
+        return None
+
+
+class EMACrossoverStrategy(BaseStrategy):
+    """
+    Classical EMA(9)/EMA(21) crossover trend follower.
+
+    LONG when fast EMA crosses above slow EMA, confirmed by a positive MACD
+    histogram and volume above its 20-bar average. SHORT on the mirror image.
+
+    Stop: 2x ATR; target: 3x ATR (so R:R = 1.5 by construction).
+    """
+
+    FAST_PERIOD = 9
+    SLOW_PERIOD = 21
+
+    def __init__(
+        self,
+        sl_atr_mult: float = 2.0,
+        tp_atr_mult: float = 3.0,
+        volume_mult: float = 1.0,
+    ):
+        super().__init__(StrategyType.EMA_CROSSOVER)
+        self.sl_atr_mult = sl_atr_mult
+        self.tp_atr_mult = tp_atr_mult
+        self.volume_mult = volume_mult
+
+    @staticmethod
+    def _ema_series(data: np.ndarray, period: int) -> np.ndarray:
+        alpha = 2.0 / (period + 1)
+        out = np.zeros_like(data, dtype=float)
+        if len(data) == 0:
+            return out
+        out[0] = float(data[0])
+        for i in range(1, len(data)):
+            out[i] = alpha * float(data[i]) + (1 - alpha) * out[i - 1]
+        return out
+
+    def generate_signal(
+        self,
+        df: pd.DataFrame,
+        indicator_data: Optional[Dict] = None,
+        agent_reports: Optional[Dict[str, str]] = None,
+        adaptive_params: Optional[Dict[str, float]] = None,
+    ) -> Optional[Signal]:
+        if len(df) < self.SLOW_PERIOD + 5:
+            return None
+
+        close = df["Close"].values.astype(float)
+        indicators = indicator_data or self._compute_indicators(df)
+
+        fast = self._ema_series(close, self.FAST_PERIOD)
+        slow = self._ema_series(close, self.SLOW_PERIOD)
+
+        prev_diff = fast[-2] - slow[-2]
+        curr_diff = fast[-1] - slow[-1]
+        bullish_cross = prev_diff <= 0 and curr_diff > 0
+        bearish_cross = prev_diff >= 0 and curr_diff < 0
+
+        if not (bullish_cross or bearish_cross):
+            return None
+
+        macd_hist = float(indicators.get("macd_hist", 0.0))
+        volume_ratio = float(indicators.get("volume_ratio", 1.0))
+        atr = float(indicators.get("atr", float(close[-1]) * 0.02))
+        current_price = float(close[-1])
+
+        # Confirm with MACD direction AND volume > average.
+        if volume_ratio < self.volume_mult:
+            return None
+
+        params = _resolve_params(adaptive_params, df.attrs.get("timeframe"))
+        sl_mult = float(params.get("sl_atr_mult", self.sl_atr_mult))
+        tp_mult = float(params.get("tp_atr_mult", self.tp_atr_mult))
+        # Keep built-in 1.5 R:R floor even on tight-SL timeframes (5m/15m).
+        if tp_mult < sl_mult * 1.5:
+            tp_mult = sl_mult * 1.5
+
+        if bullish_cross and macd_hist > 0:
+            stop_loss = current_price - sl_mult * atr
+            take_profit = current_price + tp_mult * atr
+            rr = (take_profit - current_price) / max(current_price - stop_loss, 1e-9)
+            strength = float(np.clip(0.5 + 0.25 * min(1.0, volume_ratio - 1.0)
+                                     + 0.25 * min(1.0, abs(curr_diff) / atr if atr > 0 else 0.0),
+                                     0.0, 1.0))
+            return Signal(
+                direction="LONG",
+                strength=strength,
+                strategy=self.strategy_type,
+                symbol=df.attrs.get("symbol", "UNKNOWN"),
+                timeframe=df.attrs.get("timeframe", "1h"),
+                entry_price=current_price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                risk_reward_ratio=rr,
+                reasoning=(
+                    f"EMA Crossover LONG: fast({self.FAST_PERIOD})={fast[-1]:.4f} crossed "
+                    f"above slow({self.SLOW_PERIOD})={slow[-1]:.4f}, "
+                    f"MACD hist={macd_hist:.4f}, vol ratio={volume_ratio:.2f}."
+                ),
+                metadata={**indicators, "ema_fast": float(fast[-1]),
+                          "ema_slow": float(slow[-1])},
+            )
+
+        if bearish_cross and macd_hist < 0:
+            stop_loss = current_price + sl_mult * atr
+            take_profit = current_price - tp_mult * atr
+            if take_profit <= 0:
+                return None
+            rr = (current_price - take_profit) / max(stop_loss - current_price, 1e-9)
+            strength = float(np.clip(0.5 + 0.25 * min(1.0, volume_ratio - 1.0)
+                                     + 0.25 * min(1.0, abs(curr_diff) / atr if atr > 0 else 0.0),
+                                     0.0, 1.0))
+            return Signal(
+                direction="SHORT",
+                strength=strength,
+                strategy=self.strategy_type,
+                symbol=df.attrs.get("symbol", "UNKNOWN"),
+                timeframe=df.attrs.get("timeframe", "1h"),
+                entry_price=current_price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                risk_reward_ratio=rr,
+                reasoning=(
+                    f"EMA Crossover SHORT: fast({self.FAST_PERIOD})={fast[-1]:.4f} crossed "
+                    f"below slow({self.SLOW_PERIOD})={slow[-1]:.4f}, "
+                    f"MACD hist={macd_hist:.4f}, vol ratio={volume_ratio:.2f}."
+                ),
+                metadata={**indicators, "ema_fast": float(fast[-1]),
+                          "ema_slow": float(slow[-1])},
+            )
+
+        return None
+
+
 # Strategy registry
 STRATEGIES: Dict[StrategyType, BaseStrategy] = {
     StrategyType.MOMENTUM: MomentumStrategy(),
@@ -1167,6 +1574,9 @@ STRATEGIES: Dict[StrategyType, BaseStrategy] = {
     StrategyType.KRONOS_MOMENTUM_CONFIRM: KronosMomentumConfirmStrategy(),
     StrategyType.KRONOS_DIVERGENCE: KronosDivergenceStrategy(),
     StrategyType.MULTI_TIMEFRAME_KRONOS: MultiTimeframeKronosStrategy(),
+    StrategyType.VWAP_REVERSION: VWAPReversionStrategy(),
+    StrategyType.BB_SQUEEZE: BollingerBandSqueezeStrategy(),
+    StrategyType.EMA_CROSSOVER: EMACrossoverStrategy(),
 }
 
 

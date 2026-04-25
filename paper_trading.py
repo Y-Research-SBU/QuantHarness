@@ -38,9 +38,9 @@ class PaperTradingEngine:
     MASTER_SYMBOL = "__MASTER__"
     MASTER_INITIAL_BALANCE = 10000.0
 
-    MAX_POSITIONS = 20              # Max concurrent open positions across all markets
+    MAX_POSITIONS = 12              # Max concurrent open positions across all markets
     MAX_POSITION_SIZE = 500.0       # Max $ per position
-    MIN_POSITION_SIZE = 50.0        # Min $ per position
+    MIN_POSITION_SIZE = 100.0       # Min $ per position
     MAX_EXPOSURE_PCT = 0.60         # Max 60% of master portfolio deployed at once
 
     # Post-close cooldown: after a trade on a symbol is closed or stopped out,
@@ -48,6 +48,13 @@ class PaperTradingEngine:
     # oscillation where a stopped-out SHORT gets reopened on the next scan
     # because the strategy is still firing against the prior setup.
     COOLDOWN_MINUTES = 30
+
+    # Flat-trade guard: don't run stop/target checks on trades opened within
+    # the last ``MIN_HOLD_MINUTES``. This prevents the scanner from instantly
+    # closing a fresh position at the entry price when stale OHLCV bars make
+    # the latest quote look like it just hit the stop — the dominant source of
+    # $0-PnL "flat" trades.
+    MIN_HOLD_MINUTES = 15
 
     # Reject trades whose entry_price / stop_loss / take_profit come in at or
     # below this value. Catches data-feed bugs that return 0.0 for very low
@@ -59,6 +66,17 @@ class PaperTradingEngine:
     # bot from repeatedly shorting into a rally (INJ-USD problem).
     SYMBOL_CB_MAX_CONSECUTIVE_LOSSES = 3
     SYMBOL_CB_COOLDOWN_MINUTES = 480  # 8 hours (was 2h, increased after INJ-USD kept re-entering)
+
+    # ── Minimum stop distance floor ──────────────────────────────
+    # Reject trades where the stop-loss is too tight (noise-level).
+    # Keyed by MarketCategory value; prevents ATR-based stops from being
+    # hit by normal intraday volatility on low-timeframe scans.
+    MIN_STOP_PCT = {
+        "crypto": 0.03,   # 3% minimum stop for crypto
+        "stocks": 0.015,  # 1.5% minimum stop for equities
+        "forex": 0.005,   # 0.5% minimum stop for forex
+    }
+    MIN_STOP_DEFAULT = 0.02  # 2% fallback
 
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path
@@ -258,6 +276,23 @@ class PaperTradingEngine:
         if position_size.take_profit is None or float(position_size.take_profit) <= self.MIN_PRICE:
             logger.warning(
                 f"Rejected {signal.symbol}: take_profit={position_size.take_profit} invalid"
+            )
+            return None
+
+        # ── Minimum stop distance guard ──────────────────────────────
+        # Reject trades where the stop is too close to entry — these get
+        # eaten by normal volatility and produce guaranteed losses.
+        entry_px = float(signal.entry_price)
+        stop_px = float(position_size.stop_loss)
+        stop_dist_pct = abs(entry_px - stop_px) / entry_px if entry_px > 0 else 0
+        market_cfg = MARKETS.get(signal.symbol)
+        category = market_cfg.category.value if market_cfg else "crypto"
+        min_stop = self.MIN_STOP_PCT.get(category, self.MIN_STOP_DEFAULT)
+        if stop_dist_pct < min_stop:
+            logger.warning(
+                f"Rejected {signal.symbol}: stop distance {stop_dist_pct:.2%} "
+                f"below minimum {min_stop:.1%} for {category}. "
+                f"entry={entry_px:.4f} stop={stop_px:.4f}"
             )
             return None
 
@@ -588,14 +623,30 @@ class PaperTradingEngine:
         }
 
     def check_stops(self, current_prices: Dict[str, float]) -> List[Dict]:
-        """Check all open positions for stop-loss/take-profit hits."""
+        """Check all open positions for stop-loss/take-profit hits.
+
+        Trades opened within ``MIN_HOLD_MINUTES`` are skipped so a stale quote
+        at entry time doesn't instantly trigger a flat $0 exit.
+        """
         closed = []
         open_trades = self.get_open_positions()
+        min_hold_cutoff = datetime.utcnow() - timedelta(minutes=self.MIN_HOLD_MINUTES)
 
         for trade in open_trades:
             symbol = trade["symbol"]
             if symbol not in current_prices:
                 continue
+
+            # Skip trades younger than MIN_HOLD_MINUTES — prevents instant exits
+            # driven by entry-price == current-price stale data.
+            entry_time_raw = trade.get("entry_time")
+            if entry_time_raw and self.MIN_HOLD_MINUTES > 0:
+                try:
+                    entry_dt = datetime.fromisoformat(str(entry_time_raw))
+                    if entry_dt > min_hold_cutoff:
+                        continue
+                except (TypeError, ValueError):
+                    pass  # unparseable timestamp → fall through and evaluate
 
             price = current_prices[symbol]
 

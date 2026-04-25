@@ -234,8 +234,15 @@ def test_close_already_closed_trade_returns_none(tmp_db_path):
 # ─────────────────────── Check stops ───────────────────────
 
 
+def _fresh_engine(tmp_db_path: str) -> PaperTradingEngine:
+    """Engine with MIN_HOLD_MINUTES disabled for immediate stop checks in tests."""
+    e = PaperTradingEngine(db_path=tmp_db_path)
+    e.MIN_HOLD_MINUTES = 0
+    return e
+
+
 def test_check_stops_triggers_stop_loss_long(tmp_db_path):
-    engine = PaperTradingEngine(db_path=tmp_db_path)
+    engine = _fresh_engine(tmp_db_path)
     engine.execute_trade(_mk_signal(entry=100, stop=95, tp=110), _mk_pos(size=500, qty=5, stop=95, tp=110))
     closed = engine.check_stops({"BTC-USD": 94.0})
     assert len(closed) == 1
@@ -243,7 +250,7 @@ def test_check_stops_triggers_stop_loss_long(tmp_db_path):
 
 
 def test_check_stops_triggers_take_profit_long(tmp_db_path):
-    engine = PaperTradingEngine(db_path=tmp_db_path)
+    engine = _fresh_engine(tmp_db_path)
     engine.execute_trade(_mk_signal(entry=100, stop=95, tp=110), _mk_pos(size=500, qty=5, stop=95, tp=110))
     closed = engine.check_stops({"BTC-USD": 111.0})
     assert len(closed) == 1
@@ -251,7 +258,7 @@ def test_check_stops_triggers_take_profit_long(tmp_db_path):
 
 
 def test_check_stops_triggers_stop_loss_short(tmp_db_path):
-    engine = PaperTradingEngine(db_path=tmp_db_path)
+    engine = _fresh_engine(tmp_db_path)
     sig = _mk_signal(direction="SHORT", entry=100, stop=105, tp=90)
     engine.execute_trade(sig, _mk_pos(size=500, qty=5, stop=105, tp=90))
     closed = engine.check_stops({"BTC-USD": 106.0})
@@ -260,14 +267,14 @@ def test_check_stops_triggers_stop_loss_short(tmp_db_path):
 
 
 def test_check_stops_ignores_price_in_range(tmp_db_path):
-    engine = PaperTradingEngine(db_path=tmp_db_path)
+    engine = _fresh_engine(tmp_db_path)
     engine.execute_trade(_mk_signal(entry=100, stop=95, tp=110), _mk_pos(size=500, qty=5, stop=95, tp=110))
     closed = engine.check_stops({"BTC-USD": 102.0})
     assert closed == []
 
 
 def test_check_stops_handles_missing_price(tmp_db_path):
-    engine = PaperTradingEngine(db_path=tmp_db_path)
+    engine = _fresh_engine(tmp_db_path)
     engine.execute_trade(_mk_signal(), _mk_pos())
     # No price for BTC → no crash
     closed = engine.check_stops({"ETH-USD": 3000.0})
@@ -637,3 +644,65 @@ def test_symbol_circuit_breaker_scoped_to_symbol(tmp_db_path):
     assert engine.execute_trade(_mk_signal(symbol="BTC-USD"), _mk_pos(size=200, qty=2)) is None
     # ETH still open
     assert engine.execute_trade(_mk_signal(symbol="ETH-USD"), _mk_pos(size=200, qty=2)) is not None
+
+
+# ─────────────────────── Min hold time guard (flat-trade fix) ───────────────────────
+
+
+def test_check_stops_skips_trades_younger_than_min_hold(tmp_db_path):
+    """A trade opened seconds ago must not be closed by check_stops while
+    the min-hold guard is active — even if the current price is at the stop."""
+    engine = PaperTradingEngine(db_path=tmp_db_path)
+    engine.MIN_HOLD_MINUTES = 15  # production default
+    engine.execute_trade(_mk_signal(entry=100, stop=95, tp=110), _mk_pos(size=500, qty=5, stop=95, tp=110))
+
+    # Price right at the stop — would trigger if guard wasn't applied.
+    closed = engine.check_stops({"BTC-USD": 95.0})
+    assert closed == []
+    # Position still open.
+    assert len(engine.get_open_positions("BTC-USD")) == 1
+
+
+def test_check_stops_runs_when_min_hold_disabled(tmp_db_path):
+    """With MIN_HOLD_MINUTES=0 the guard is a no-op."""
+    engine = PaperTradingEngine(db_path=tmp_db_path)
+    engine.MIN_HOLD_MINUTES = 0
+    engine.execute_trade(_mk_signal(entry=100, stop=95, tp=110), _mk_pos(size=500, qty=5, stop=95, tp=110))
+
+    closed = engine.check_stops({"BTC-USD": 94.0})
+    assert len(closed) == 1
+    assert closed[0]["status"] == "STOPPED"
+
+
+def test_check_stops_processes_old_trades_past_min_hold(tmp_db_path):
+    """A trade whose entry_time is older than MIN_HOLD_MINUTES must be evaluated."""
+    from datetime import datetime, timedelta
+
+    engine = PaperTradingEngine(db_path=tmp_db_path)
+    engine.MIN_HOLD_MINUTES = 15
+    engine.execute_trade(_mk_signal(entry=100, stop=95, tp=110), _mk_pos(size=500, qty=5, stop=95, tp=110))
+
+    # Backdate entry_time so the guard releases.
+    old_ts = (datetime.utcnow() - timedelta(minutes=30)).isoformat()
+    from db_schema import get_connection
+    with get_connection(tmp_db_path) as conn:
+        conn.execute("UPDATE trades SET entry_time = ? WHERE status = 'OPEN'", (old_ts,))
+
+    closed = engine.check_stops({"BTC-USD": 94.0})
+    assert len(closed) == 1
+    assert closed[0]["status"] == "STOPPED"
+
+
+# ─────────────────────── New constants ───────────────────────
+
+
+def test_max_positions_tightened_to_12():
+    assert PaperTradingEngine.MAX_POSITIONS == 12
+
+
+def test_min_position_size_raised_to_100():
+    assert PaperTradingEngine.MIN_POSITION_SIZE == 100.0
+
+
+def test_min_hold_minutes_default_is_15():
+    assert PaperTradingEngine.MIN_HOLD_MINUTES == 15

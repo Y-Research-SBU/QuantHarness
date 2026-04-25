@@ -220,3 +220,129 @@ def test_trend_filter_allows_ranging_regime(tmp_db_path):
     )
     ids = scanner.execute_signals([signal])
     assert len(ids) >= 1
+
+
+def test_close_orphaned_positions(tmp_db_path):
+    """Positions for symbols removed from MARKETS should be force-closed."""
+    from strategies import Signal
+    from market_config import StrategyType
+
+    scanner = MarketScanner(db_path=tmp_db_path)
+
+    # Open a trade for BTC-USD (a real MARKETS symbol)
+    signal = Signal(
+        direction="LONG", strength=0.8, strategy=StrategyType.MOMENTUM,
+        symbol="BTC-USD", timeframe="4h",
+        entry_price=100.0, stop_loss=90.0, take_profit=120.0,
+        risk_reward_ratio=2.0, reasoning="test",
+    )
+    ids = scanner.execute_signals([signal])
+    assert len(ids) == 1
+
+    # Manually insert an orphan trade for a symbol NOT in MARKETS
+    from db_schema import get_connection
+    from datetime import datetime
+    with get_connection(tmp_db_path) as conn:
+        conn.execute(
+            """INSERT INTO trades
+               (symbol, timeframe, strategy, direction, entry_price, position_size,
+                quantity, stop_loss, take_profit, pnl, status, created_at, updated_at,
+                entry_time)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("FAKE-ORPHAN", "4h", "momentum", "LONG", 50.0, 100.0,
+             2.0, 45.0, 60.0, 0.0, "OPEN",
+             datetime.utcnow().isoformat(), datetime.utcnow().isoformat(),
+             datetime.utcnow().isoformat()),
+        )
+
+    # Verify we have 2 open positions
+    open_before = scanner.engine.get_open_positions()
+    assert len(open_before) == 2
+
+    # Run orphan cleanup with only BTC-USD as active
+    closed = scanner._close_orphaned_positions(
+        active_symbols=["BTC-USD"],
+        current_prices={"BTC-USD": 105.0},
+    )
+
+    # Orphan should be closed (at entry price since no price available)
+    assert len(closed) == 1
+    assert closed[0]["symbol"] == "FAKE-ORPHAN"
+
+    # Only BTC-USD should remain open
+    open_after = scanner.engine.get_open_positions()
+    assert len(open_after) == 1
+    assert open_after[0]["symbol"] == "BTC-USD"
+
+
+def test_single_symbol_scan_does_not_orphan_other_markets(tmp_db_path, patched_fetcher):
+    """run_scan_cycle(symbols=[X]) must NOT force-close positions on other
+    valid MARKETS symbols.  Regression test for the bug where the per-symbol
+    scan list was passed to orphan detection, causing every open trade on a
+    *different* symbol to be closed immediately."""
+    from strategies import Signal
+    from market_config import StrategyType
+
+    scanner = MarketScanner(db_path=tmp_db_path)
+
+    # Open a trade on ETH-USD (a valid MARKETS symbol)
+    signal = Signal(
+        direction="LONG", strength=0.8, strategy=StrategyType.KRONOS_MOMENTUM_CONFIRM,
+        symbol="ETH-USD", timeframe="4h",
+        entry_price=3000.0, stop_loss=2800.0, take_profit=3400.0,
+        risk_reward_ratio=2.0, reasoning="test",
+    )
+    ids = scanner.execute_signals([signal])
+    assert len(ids) == 1
+
+    # Now run a scan cycle for BTC-USD only
+    results = scanner.run_scan_cycle(symbols=["BTC-USD"])
+
+    # ETH-USD position should still be open — it's a valid MARKETS symbol,
+    # not an orphan.
+    open_positions = scanner.engine.get_open_positions()
+    eth_open = [p for p in open_positions if p["symbol"] == "ETH-USD"]
+    assert len(eth_open) == 1, (
+        f"ETH-USD position was incorrectly closed as orphan during BTC-USD scan. "
+        f"Open positions: {[p['symbol'] for p in open_positions]}"
+    )
+
+
+# ─────────────────────── Min-strength filter ───────────────────────
+
+
+def test_execute_signals_drops_weak_signals(tmp_db_path):
+    """Signals with strength below MIN_SIGNAL_STRENGTH (0.4) must be rejected
+    before sizing/execution, even when nothing else would block them."""
+    from strategies import Signal
+    from scanner import MIN_SIGNAL_STRENGTH
+
+    scanner = MarketScanner(db_path=tmp_db_path)
+    weak = Signal(
+        direction="LONG", strength=MIN_SIGNAL_STRENGTH - 0.05,
+        strategy=StrategyType.MOMENTUM,
+        symbol="BTC-USD", timeframe="4h",
+        entry_price=100.0, stop_loss=95.0, take_profit=120.0,
+        risk_reward_ratio=2.0, reasoning="weak",
+        metadata={},
+    )
+    ids = scanner.execute_signals([weak])
+    assert ids == []
+
+
+def test_execute_signals_keeps_signals_at_or_above_strength_floor(tmp_db_path):
+    from strategies import Signal
+    from scanner import MIN_SIGNAL_STRENGTH
+
+    scanner = MarketScanner(db_path=tmp_db_path)
+    strong = Signal(
+        direction="LONG", strength=MIN_SIGNAL_STRENGTH + 0.4,
+        strategy=StrategyType.MOMENTUM,
+        symbol="BTC-USD", timeframe="4h",
+        entry_price=100.0, stop_loss=95.0, take_profit=120.0,
+        risk_reward_ratio=2.0, reasoning="ok",
+        metadata={},
+    )
+    ids = scanner.execute_signals([strong])
+    # Strong signal passes the filter and sizing succeeds with a 5% stop.
+    assert len(ids) == 1

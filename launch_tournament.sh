@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$REPO_ROOT"
 
 PYTHON="${PYTHON:-python3}"
-PROFILES=("crypto_aggro" "forex_focus" "top25_only")
+PROFILES=("baseline" "crypto_aggro" "forex_focus" "top25_only" "crypto_kronos_only" "crypto_breakout_vol")
 
 start_profile() {
   local name="$1"

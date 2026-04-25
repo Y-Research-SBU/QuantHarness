@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 from data_fetcher import fetch_market_data, prepare_kline_dict
-from kronos_agent import KronosForecastAgent
+from kronos_agent import KronosForecastAgent, is_timeframe_trusted_for_kronos
 from market_config import MARKETS, MarketConfig, StrategyType
 from paper_trading import PaperTradingEngine
 from position_sizing import calculate_position_size, calculate_stop_loss
@@ -282,11 +282,20 @@ class MarketScanner:
                     agent_reports = self._run_agent_analysis(symbol, timeframe, df)
 
                 # Always include Kronos forecast if enabled (cheap, no LLM call).
-                if self.use_kronos:
+                # 2026-04-25 REL-376: skip Kronos on timeframes we have not
+                # validated as above coin-flip. Currently only 1d. Strategies
+                # that depend on Kronos will simply not fire on other
+                # timeframes until the horizon sweep produces new evidence.
+                if self.use_kronos and is_timeframe_trusted_for_kronos(timeframe):
                     kronos_data = self._run_kronos_forecast(symbol, timeframe, df)
                     if kronos_data is not None:
                         agent_reports = dict(agent_reports or {})
                         agent_reports["kronos_forecast_data"] = kronos_data
+                elif self.use_kronos:
+                    logger.debug(
+                        "Kronos skipped for %s on %s (timeframe not in KRONOS_TRUSTED_TIMEFRAMES)",
+                        symbol, timeframe,
+                    )
 
                 # Run strategies (using evolution-filtered list)
                 signals = run_all_strategies(

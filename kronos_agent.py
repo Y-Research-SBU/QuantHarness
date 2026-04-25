@@ -84,6 +84,23 @@ _DEFAULT_HORIZON_BY_TF = {
     "1w": 4,
 }
 
+# 2026-04-25: REL-376 partial finding. Kronos shows 54.55% accuracy on BTC 1d
+# but 27.9% on 1h horizon=24 in production (worse than coin flip). Until
+# the horizon sweep finishes, restrict Kronos to timeframes where it's
+# proven accurate. The strategies.py layer reads this set to decide whether
+# to attach Kronos forecasts to a signal at all.
+#
+# When the investigation finishes and we have evidence for shorter horizons
+# (h=6 / h=12 on 1h bars, etc.), expand this allowlist accordingly.
+KRONOS_TRUSTED_TIMEFRAMES = frozenset({"1d"})
+
+
+def is_timeframe_trusted_for_kronos(timeframe: Optional[str]) -> bool:
+    """True if Kronos forecasts on this timeframe are above coin-flip in our audit."""
+    if not timeframe:
+        return False
+    return timeframe in KRONOS_TRUSTED_TIMEFRAMES
+
 
 class KronosForecastAgent:
     """

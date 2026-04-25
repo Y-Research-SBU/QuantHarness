@@ -556,3 +556,118 @@ def test_zero_win_not_disabled_at_4_trades(tmp_db_path):
     assert weights.get("young_strat") != WEIGHT_DISABLED, (
         f"Expected young_strat NOT to be disabled at 4 trades, got weight={weights.get('young_strat')}"
     )
+
+
+# ---------------------------------------------------------------------------
+# evaluate_pending_kronos_predictions — delisted-symbol filtering
+# ---------------------------------------------------------------------------
+
+
+def _seed_kronos_pending(
+    db_path: str,
+    symbol: str,
+    timeframe: str = "1h",
+    horizon: int = 1,
+    pred_time: str = "2026-04-20 00:00:00",
+) -> int:
+    """Insert one pending kronos_predictions row (correct IS NULL)."""
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    cur = conn.execute(
+        """
+        INSERT INTO kronos_predictions
+          (symbol, timeframe, horizon, predicted_direction, predicted_magnitude,
+           predicted_price, confidence, prediction_time)
+        VALUES (?, ?, ?, 'UP', 1.0, 100.0, 0.7, ?)
+        """,
+        (symbol, timeframe, horizon, pred_time),
+    )
+    rowid = int(cur.lastrowid)
+    conn.commit()
+    conn.close()
+    return rowid
+
+
+def test_evaluate_pending_skips_delisted_symbols(tmp_db_path, monkeypatch):
+    """Pending predictions for symbols not in MARKETS get correct=-1 and never
+    trigger a price_lookup call.
+    """
+    import pandas as pd
+    import sqlite3
+    import market_config
+
+    si = SelfImprover(db_path=tmp_db_path)
+
+    active_id = _seed_kronos_pending(tmp_db_path, "BTC-USD")
+    delisted_id = _seed_kronos_pending(tmp_db_path, "ORDI-USD")
+
+    # Force MARKETS to a known active set for this test.
+    class _FakeCfg:
+        timeframes = ("1h",)
+    monkeypatch.setattr(market_config, "MARKETS", {"BTC-USD": _FakeCfg()}, raising=False)
+
+    # price_lookup must NEVER be called for the delisted symbol.
+    calls = []
+
+    def fake_lookup(symbol, interval, start, end):
+        calls.append(symbol)
+        # Return a frame with two bars covering anchor + target so the active
+        # row resolves cleanly.
+        ts = pd.date_range(start=pd.Timestamp("2026-04-19 23:00:00"), periods=4, freq="1H")
+        return pd.DataFrame({"Datetime": ts, "Close": [100.0, 100.0, 102.0, 102.0]})
+
+    stats = si.evaluate_pending_kronos_predictions(
+        now=pd.Timestamp("2026-04-25 00:00:00"),
+        price_lookup=fake_lookup,
+    )
+
+    # Delisted row should NOT have triggered a fetch.
+    assert "ORDI-USD" not in calls, f"price_lookup called for delisted symbol: {calls}"
+    assert stats["skipped_delisted"] >= 1
+
+    # Verify the delisted row was marked correct=-1 in the DB.
+    conn = sqlite3.connect(tmp_db_path)
+    row = conn.execute(
+        "SELECT correct FROM kronos_predictions WHERE id = ?", (delisted_id,)
+    ).fetchone()
+    conn.close()
+    assert row[0] == -1, f"Expected correct=-1 for delisted row, got {row[0]}"
+
+
+def test_evaluate_kronos_accuracy_excludes_unresolvable(tmp_db_path):
+    """Rows with correct=-1 (delisted/unresolvable) must NOT be counted in
+    accuracy stats.
+    """
+    import sqlite3
+
+    si = SelfImprover(db_path=tmp_db_path)
+
+    conn = sqlite3.connect(tmp_db_path)
+    # 1 resolvable correct, 1 resolvable wrong, 1 unresolvable (-1).
+    base_args = (
+        "BTC-USD", "1h", 1, "UP", 1.0, 100.0, 0.7, "2026-04-20 00:00:00",
+        "UP", 1.5, 101.0, "2026-04-20 01:00:00",
+    )
+    sql = (
+        "INSERT INTO kronos_predictions "
+        "(symbol, timeframe, horizon, predicted_direction, predicted_magnitude, "
+        " predicted_price, confidence, prediction_time, "
+        " actual_direction, actual_magnitude, actual_price, evaluation_time, correct) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+    conn.execute(sql, base_args + (1,))
+    conn.execute(sql, base_args + (0,))
+    conn.execute(
+        sql,
+        (
+            "ORDI-USD", "1h", 1, "UP", 1.0, 100.0, 0.7, "2026-04-20 00:00:00",
+            None, None, None, "2026-04-25 00:00:00", -1,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    acc = si.evaluate_kronos_accuracy()
+    # Should count 2 rows (the -1 row excluded), 1 correct -> 50%.
+    assert acc["n"] == 2, f"expected 2 evaluable rows, got {acc}"
+    assert acc["hit_rate"] == pytest.approx(0.5, abs=1e-6)

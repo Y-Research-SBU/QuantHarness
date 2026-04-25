@@ -571,6 +571,225 @@ class SelfImprover:
                 ),
             )
 
+    # ------------------------------------------------------------------
+    # L5 — pending-prediction resolver (REL-376)
+    # ------------------------------------------------------------------
+
+    # Direction threshold MUST match KronosForecastAgent.UP_THRESHOLD_PCT so
+    # we measure with the same yardstick the model uses.
+    KRONOS_DIRECTION_THRESHOLD_PCT = 0.25
+
+    # Per-timeframe bar-step. Aligned with kronos_agent._timeframe_to_timedelta
+    # but expressed in pandas-compatible offsets.
+    _TIMEFRAME_STEP = {
+        "1m": pd.Timedelta(minutes=1),
+        "5m": pd.Timedelta(minutes=5),
+        "15m": pd.Timedelta(minutes=15),
+        "30m": pd.Timedelta(minutes=30),
+        "1h": pd.Timedelta(hours=1),
+        "4h": pd.Timedelta(hours=4),
+        "1d": pd.Timedelta(days=1),
+        "1w": pd.Timedelta(weeks=1),
+    }
+
+    @classmethod
+    def _direction_from_pct(cls, pct: float) -> str:
+        if pct > cls.KRONOS_DIRECTION_THRESHOLD_PCT:
+            return "UP"
+        if pct < -cls.KRONOS_DIRECTION_THRESHOLD_PCT:
+            return "DOWN"
+        return "NEUTRAL"
+
+    @classmethod
+    def _resolution_target(
+        cls, prediction_time: pd.Timestamp, timeframe: str, horizon: int
+    ) -> Optional[pd.Timestamp]:
+        """Return the wall-clock time at which the prediction can be resolved.
+
+        Returns ``prediction_time + horizon * step``. If the timeframe is
+        unknown we return ``None`` (caller should skip the row).
+        """
+        step = cls._TIMEFRAME_STEP.get(str(timeframe or "").lower())
+        if step is None or int(horizon) <= 0:
+            return None
+        return pd.Timestamp(prediction_time) + step * int(horizon)
+
+    def evaluate_pending_kronos_predictions(
+        self,
+        now: Optional[pd.Timestamp] = None,
+        max_rows: int = 500,
+        price_lookup: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Resolve every pending Kronos prediction whose horizon has elapsed.
+
+        For each row with ``correct IS NULL`` and ``prediction_time +
+        horizon * step`` <= ``now``:
+
+        1. Pick the anchor close at ``prediction_time`` (the bar at-or-just-
+           before the prediction was logged).
+        2. Pick the actual close at ``prediction_time + horizon * step``
+           (the bar at-or-just-before that target).
+        3. Compute ``actual_pct`` and ``actual_direction`` using the SAME
+           ``±0.25%`` threshold the model uses for its UP/DOWN call.
+        4. Write back ``actual_*``, ``evaluation_time``, ``correct``.
+
+        ``price_lookup(symbol, interval, start, end) -> pd.DataFrame`` may be
+        injected for tests. In production we use ``data_fetcher.fetch_market_data``
+        with a tight date window so the cache deduplicates calls.
+
+        Returns a stats dict ``{resolved, skipped_no_data, skipped_unknown_tf}``.
+        """
+        if now is None:
+            now = pd.Timestamp.utcnow().tz_localize(None)
+        else:
+            now = pd.Timestamp(now)
+            if now.tzinfo is not None:
+                now = now.tz_localize(None)
+
+        # Filter out symbols that are no longer in MARKETS (e.g. delisted) so we
+        # don't spam yfinance with requests that always fail. Pending rows for
+        # such symbols are marked correct=-1 to take them out of the queue
+        # without losing the historical record.
+        try:
+            from market_config import MARKETS as _MARKETS  # local import to avoid cycle
+            _active_symbols = set(_MARKETS.keys())
+        except Exception:
+            _active_symbols = None
+
+        if price_lookup is None:
+            try:
+                from data_fetcher import fetch_market_data as _fmd  # local import to avoid cycle
+            except Exception:
+                _fmd = None
+
+            def price_lookup(symbol, interval, start, end):  # noqa: E306
+                if _fmd is None:
+                    return pd.DataFrame()
+                try:
+                    return _fmd(symbol, interval=interval, start_date=start, end_date=end, use_cache=True)
+                except Exception as exc:
+                    logger.debug("price_lookup failed for %s/%s: %s", symbol, interval, exc)
+                    return pd.DataFrame()
+
+        with get_connection(self.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT id, symbol, timeframe, horizon, predicted_direction,
+                       predicted_magnitude, predicted_price, prediction_time
+                FROM kronos_predictions
+                WHERE correct IS NULL
+                ORDER BY prediction_time ASC
+                LIMIT ?
+                """,
+                (int(max_rows),),
+            ).fetchall()
+        rows = [dict(r) for r in rows]
+
+        stats = {
+            "resolved": 0,
+            "skipped_no_data": 0,
+            "skipped_unknown_tf": 0,
+            "skipped_not_due": 0,
+            "skipped_delisted": 0,
+        }
+
+        # Bulk-mark delisted-symbol rows as correct=-1 so we stop polling them
+        # every cycle. -1 is a sentinel meaning "unresolvable" (NULL = pending,
+        # 0/1 = resolved). It excludes them from accuracy stats below.
+        if _active_symbols is not None:
+            with get_connection(self.db_path) as conn:
+                placeholders = ",".join("?" * len(_active_symbols)) if _active_symbols else "''"
+                if _active_symbols:
+                    cur = conn.execute(
+                        f"""
+                        UPDATE kronos_predictions
+                           SET correct = -1,
+                               evaluation_time = datetime('now')
+                         WHERE correct IS NULL
+                           AND symbol NOT IN ({placeholders})
+                        """,
+                        tuple(_active_symbols),
+                    )
+                    stats["skipped_delisted"] = cur.rowcount or 0
+
+        for row in rows:
+            symbol = row["symbol"]
+            if _active_symbols is not None and symbol not in _active_symbols:
+                # Already marked above; skip to avoid the yfinance call.
+                continue
+            timeframe = (row["timeframe"] or "").lower()
+            horizon = int(row["horizon"] or 0)
+            try:
+                pred_time = pd.Timestamp(row["prediction_time"])
+                if pred_time.tzinfo is not None:
+                    pred_time = pred_time.tz_localize(None)
+            except Exception:
+                stats["skipped_unknown_tf"] += 1
+                continue
+
+            target = self._resolution_target(pred_time, timeframe, horizon)
+            if target is None:
+                stats["skipped_unknown_tf"] += 1
+                continue
+            if target > now:
+                stats["skipped_not_due"] += 1
+                continue
+
+            # Pull a window covering [pred_time - 1 step, target + 1 step].
+            step = self._TIMEFRAME_STEP[timeframe]
+            start = pred_time - step * 2
+            end = target + step * 2
+            df = price_lookup(symbol, timeframe, start, end)
+            if df is None or len(df) == 0 or "Close" not in df.columns:
+                stats["skipped_no_data"] += 1
+                continue
+
+            ts_col = "Datetime" if "Datetime" in df.columns else None
+            if ts_col is None:
+                if isinstance(df.index, pd.DatetimeIndex):
+                    df = df.reset_index().rename(columns={df.index.name or "index": "Datetime"})
+                    ts_col = "Datetime"
+                else:
+                    stats["skipped_no_data"] += 1
+                    continue
+
+            ts = pd.to_datetime(df[ts_col], errors="coerce")
+            try:
+                ts = ts.dt.tz_localize(None)
+            except (TypeError, AttributeError):
+                pass
+            df = df.assign(_ts=ts).dropna(subset=["_ts"]).sort_values("_ts").reset_index(drop=True)
+
+            anchor_idx = df["_ts"].searchsorted(pred_time, side="right") - 1
+            target_idx = df["_ts"].searchsorted(target, side="right") - 1
+            if anchor_idx < 0 or target_idx < 0 or target_idx <= anchor_idx:
+                stats["skipped_no_data"] += 1
+                continue
+
+            anchor_close = float(df["Close"].iloc[anchor_idx])
+            actual_close = float(df["Close"].iloc[target_idx])
+            if anchor_close <= 0:
+                stats["skipped_no_data"] += 1
+                continue
+
+            actual_pct = (actual_close - anchor_close) / anchor_close * 100.0
+            actual_direction = self._direction_from_pct(actual_pct)
+            correct = 1 if actual_direction == row["predicted_direction"] else 0
+
+            with get_connection(self.db_path) as conn:
+                conn.execute(
+                    """
+                    UPDATE kronos_predictions
+                    SET actual_direction = ?, actual_magnitude = ?, actual_price = ?,
+                        evaluation_time = datetime('now'), correct = ?
+                    WHERE id = ?
+                    """,
+                    (actual_direction, float(actual_pct), float(actual_close), int(correct), int(row["id"])),
+                )
+            stats["resolved"] += 1
+
+        return stats
+
     def evaluate_kronos_accuracy(self) -> Dict[str, Any]:
         """Summary stats over all evaluated Kronos predictions."""
         with get_connection(self.db_path) as conn:
@@ -579,7 +798,7 @@ class SelfImprover:
                 SELECT symbol, predicted_direction, predicted_magnitude, confidence,
                        actual_direction, actual_magnitude, correct
                 FROM kronos_predictions
-                WHERE correct IS NOT NULL
+                WHERE correct IS NOT NULL AND correct >= 0
                 """
             ).fetchall()
         rows = [dict(r) for r in rows]
@@ -632,7 +851,7 @@ class SelfImprover:
                 """
                 SELECT AVG(confidence) AS avg_conf, AVG(correct) AS hit_rate, COUNT(*) AS n
                 FROM kronos_predictions
-                WHERE symbol = ? AND correct IS NOT NULL
+                WHERE symbol = ? AND correct IS NOT NULL AND correct >= 0
                 """,
                 (symbol,),
             ).fetchone()
@@ -700,7 +919,12 @@ class SelfImprover:
             result.levels_run.append("L3")
             self._last_cycle_triggers["L3"] = total_trades
 
-        # L5 — every CADENCE_L5 trades
+        # L5 — every CADENCE_L5 trades; resolve pending predictions every cycle
+        # (cheap: one bounded DB scan + cache-deduped price lookups).
+        try:
+            self.evaluate_pending_kronos_predictions()
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.debug("evaluate_pending_kronos_predictions failed: %s", exc)
         if self._should_fire("L5", total_trades, CADENCE_L5):
             result.kronos_stats = self.evaluate_kronos_accuracy()
             result.levels_run.append("L5")

@@ -814,61 +814,20 @@ class PaperTradingEngine:
         trade: Dict[str, Any],
         exit_price: float,
     ) -> None:
-        """Evaluate a Kronos prediction's outcome when the trade closes.
+        """No-op stub kept for backward-compat (REL-376).
 
-        Reads ``kronos_prediction_id`` / ``kronos_entry_price`` from the
-        trade's ``decision_json`` (written by the scanner) and updates the
-        matching ``kronos_predictions`` row via the caller's open connection
-        so we don't fight the close-trade transaction for a write lock.
+        Historically this evaluated Kronos predictions against the trade's
+        exit price, which is wrong: the prediction is about price at
+        ``prediction_time + horizon * step``, NOT the trade's exit price.
+        Trades close on SL/TP/orphan-cleanup at unrelated wall-clock times,
+        so the old code locked nearly every "actual" to NEUTRAL and broke
+        Kronos accuracy reporting.
 
-        Wrapped in a wide try/except: any failure here must not mask the
-        actual trade close.
+        Real evaluation now happens in
+        ``self_improver.evaluate_pending_kronos_predictions()`` which looks
+        up the actual close at the correct future timestamp.
         """
-        try:
-            raw = trade.get("decision_json")
-            if not raw:
-                return
-            if isinstance(raw, dict):
-                md = raw
-            else:
-                try:
-                    md = json.loads(raw) if isinstance(raw, str) else {}
-                except (json.JSONDecodeError, TypeError):
-                    return
-            pred_id = md.get("kronos_prediction_id")
-            if pred_id is None:
-                return
-            entry_price = float(md.get("kronos_entry_price") or trade.get("entry_price") or 0.0)
-            if entry_price <= 0:
-                return
-            actual_pct = (float(exit_price) - entry_price) / entry_price * 100.0
-            if actual_pct > 0.1:
-                actual_direction = "UP"
-            elif actual_pct < -0.1:
-                actual_direction = "DOWN"
-            else:
-                actual_direction = "NEUTRAL"
-            # The kronos_predictions table is created by the self-improvement
-            # migration; guard against its absence in legacy DBs.
-            row = conn.execute(
-                "SELECT predicted_direction FROM kronos_predictions WHERE id = ?",
-                (int(pred_id),),
-            ).fetchone()
-            if not row:
-                return
-            correct = 1 if actual_direction == row["predicted_direction"] else 0
-            conn.execute(
-                """UPDATE kronos_predictions
-                   SET actual_direction = ?, actual_magnitude = ?, actual_price = ?,
-                       evaluation_time = datetime('now'), correct = ?
-                   WHERE id = ?""",
-                (actual_direction, float(actual_pct), float(exit_price), correct, int(pred_id)),
-            )
-        except sqlite3.OperationalError as exc:
-            # e.g. kronos_predictions table doesn't exist on an old DB.
-            logger.debug("record_kronos_outcome skipped (schema): %s", exc)
-        except Exception as exc:
-            logger.debug("record_kronos_outcome skipped: %s", exc)
+        return None
 
     def log_api_cost(
         self,

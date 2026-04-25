@@ -53,6 +53,7 @@ class MarketScanner:
         kronos_agent: Optional[KronosForecastAgent] = None,
         use_self_improvement: bool = True,
         self_improver: Optional[SelfImprover] = None,
+        profile=None,
     ):
         self.engine = PaperTradingEngine(db_path=db_path)
         self.use_agents = use_agents
@@ -60,6 +61,9 @@ class MarketScanner:
         self._trading_graph = None
         self.use_kronos = use_kronos
         self._kronos_agent = kronos_agent
+        # Tournament profile (optional). When set, overrides which (symbol,
+        # strategy) cells trade and tweaks sizing / entry thresholds.
+        self.profile = profile
 
         # ── Self-improvement (L1–L5) — additive; failures must never crash trading.
         self.use_self_improvement = use_self_improvement
@@ -182,23 +186,44 @@ class MarketScanner:
         # that proved out in the 2026-04-25 5yr backtest (Sharpe>=0.30, n>=10).
         # See strategy_whitelist.py for source + caveats.
         category_str = config.category.value if hasattr(config.category, "value") else str(config.category)
-        before_wl = len(config.enabled_strategies)
-        active_strategies = [
-            st for st in config.enabled_strategies
-            if whitelist_is_allowed(symbol, st.value, category_str)
-        ]
-        if len(active_strategies) < before_wl:
-            removed = [
-                st.value for st in config.enabled_strategies
-                if not whitelist_is_allowed(symbol, st.value, category_str)
+        use_l0 = True if self.profile is None else bool(getattr(self.profile, "use_l0_whitelist", True))
+        if use_l0:
+            before_wl = len(config.enabled_strategies)
+            active_strategies = [
+                st for st in config.enabled_strategies
+                if whitelist_is_allowed(symbol, st.value, category_str)
             ]
-            logger.info(
-                "L0 whitelist filter: removed %s for %s (kept %d)",
-                removed, symbol, len(active_strategies),
-            )
+            if len(active_strategies) < before_wl:
+                removed = [
+                    st.value for st in config.enabled_strategies
+                    if not whitelist_is_allowed(symbol, st.value, category_str)
+                ]
+                logger.info(
+                    "L0 whitelist filter: removed %s for %s (kept %d)",
+                    removed, symbol, len(active_strategies),
+                )
+        else:
+            active_strategies = list(config.enabled_strategies)
+
+        # ── Profile filter: tournament profile may further restrict which
+        # (symbol, strategy) cells trade in this instance.
+        if self.profile is not None:
+            before_p = len(active_strategies)
+            active_strategies = [
+                st for st in active_strategies
+                if self.profile.is_cell_allowed(symbol, st.value, category_str)
+            ]
+            if len(active_strategies) < before_p:
+                logger.debug(
+                    "Profile %s filter: kept %d/%d strategies for %s",
+                    self.profile.name, len(active_strategies), before_p, symbol,
+                )
+            if not active_strategies:
+                return all_signals
 
         # ── L1 evolution filter: remove strategies the self-improver disabled ──
-        if self.self_improver is not None:
+        use_l1 = True if self.profile is None else bool(getattr(self.profile, "use_l1_evolution", True))
+        if use_l1 and self.self_improver is not None:
             try:
                 disabled = set(self.self_improver.get_disabled_strategies())
                 if disabled:
@@ -416,23 +441,32 @@ class MarketScanner:
                 continue
 
             # Raw-strength floor: skip weak setups even before L1/L3/L4 weighting.
-            if float(s.strength or 0.0) < MIN_SIGNAL_STRENGTH:
+            # Profile may tweak the threshold (>1.0 stricter, <1.0 looser).
+            entry_mult = 1.0
+            if self.profile is not None:
+                entry_mult = float(getattr(self.profile, "entry_threshold_multiplier", 1.0) or 1.0)
+            min_strength = MIN_SIGNAL_STRENGTH * entry_mult
+            if float(s.strength or 0.0) < min_strength:
                 logger.debug(
                     "Skipping weak signal (strength %.2f < %.2f): %s %s",
-                    float(s.strength or 0.0), MIN_SIGNAL_STRENGTH, strat, s.symbol,
+                    float(s.strength or 0.0), min_strength, strat, s.symbol,
                 )
                 continue
 
             # Trend-conflict filter: never SHORT a trending-up market or
             # LONG a trending-down market. These counter-trend trades have
             # a terrible hit rate (the INJ-USD problem).
+            # Profile can disable the regime gate (regime_filter_enabled=False).
+            regime_gate = True if self.profile is None else bool(
+                getattr(self.profile, "regime_filter_enabled", True)
+            )
             regime = (s.metadata or {}).get("regime") if isinstance(s.metadata, dict) else None
-            if regime == "trending_up" and s.direction == "SHORT":
+            if regime_gate and regime == "trending_up" and s.direction == "SHORT":
                 logger.info(
                     "Trend filter: skipping SHORT %s — regime is trending_up", s.symbol
                 )
                 continue
-            if regime == "trending_down" and s.direction == "LONG":
+            if regime_gate and regime == "trending_down" and s.direction == "LONG":
                 logger.info(
                     "Trend filter: skipping LONG %s — regime is trending_down", s.symbol
                 )
@@ -487,6 +521,18 @@ class MarketScanner:
                 min_position_size=self.engine.MIN_POSITION_SIZE,
                 max_position_size=self.engine.MAX_POSITION_SIZE,
             )
+
+            # Profile sizing multiplier. Re-clamp to [MIN, MAX] so a tiny
+            # multiplier doesn't push a sized position below MIN_POSITION_SIZE.
+            if self.profile is not None:
+                size_mult = float(getattr(self.profile, "position_size_multiplier", 1.0) or 1.0)
+                if size_mult != 1.0 and pos.position_size_usd > 0:
+                    new_size = pos.position_size_usd * size_mult
+                    new_size = max(self.engine.MIN_POSITION_SIZE,
+                                   min(self.engine.MAX_POSITION_SIZE, new_size))
+                    if signal.entry_price and signal.entry_price > 0:
+                        pos.quantity = new_size / float(signal.entry_price)
+                    pos.position_size_usd = new_size
 
             if pos.position_size_usd <= 0:
                 continue

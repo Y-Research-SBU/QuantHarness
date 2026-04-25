@@ -402,8 +402,13 @@ def test_scan_market_filters_disabled_strategies(tmp_db_path, monkeypatch):
     assert "kronos_momentum_confirm" in strategy_values
 
 
-def test_scan_market_no_improver_uses_all_strategies(tmp_db_path, monkeypatch):
-    """Without self_improver, scanner should use all config strategies."""
+def test_scan_market_no_improver_respects_whitelist(tmp_db_path, monkeypatch):
+    """Without self_improver, scanner still applies the L0 backtest whitelist.
+
+    ADA-USD has 'momentum' in its whitelist, and 'kronos_momentum_confirm' is
+    allowed via the LIVE_KRONOS_ALLOWED_CATEGORIES override on crypto. Both
+    should pass through the L0 filter when no self_improver is configured.
+    """
     from unittest.mock import patch
     import pandas as pd
     import numpy as np
@@ -418,8 +423,8 @@ def test_scan_market_no_improver_uses_all_strategies(tmp_db_path, monkeypatch):
         return []
 
     config = MarketConfig(
-        symbol="BTC-USD",
-        display_name="Bitcoin",
+        symbol="ADA-USD",
+        display_name="Cardano",
         category=MarketCategory.CRYPTO,
         timeframes=["4h"],
         enabled_strategies=[StrategyType.MOMENTUM, StrategyType.KRONOS_MOMENTUM_CONFIRM],
@@ -435,7 +440,7 @@ def test_scan_market_no_improver_uses_all_strategies(tmp_db_path, monkeypatch):
 
     with patch("scanner.fetch_market_data", return_value=fake_df), \
          patch("scanner.run_all_strategies", side_effect=spy_run_all):
-        scanner.scan_market("BTC-USD", config)
+        scanner.scan_market("ADA-USD", config)
 
     strategy_values = [s.value if hasattr(s, 'value') else s for s in captured_strategies]
     assert "momentum" in strategy_values

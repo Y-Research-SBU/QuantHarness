@@ -100,20 +100,62 @@ def test_momentum_strategy_type():
 # ─────────────────────── Mean reversion strategy ───────────────────────
 
 
-def test_mean_reversion_short_on_overbought(overbought_ohlcv):
+def _ranging_overbought_frame(n: int = 80) -> pd.DataFrame:
+    """Range-bound prices with a final RSI spike — fits the regime gate."""
+    rng = np.full(n, 100.0) + np.sin(np.linspace(0, 6, n)) * 1.5
+    rng[-3:] += np.array([3.0, 5.5, 8.0])  # final overbought spike
+    df = pd.DataFrame({
+        "Datetime": pd.date_range(end=pd.Timestamp.utcnow(), periods=n, freq="h"),
+        "Open": rng - 0.05,
+        "High": rng + 0.5,
+        "Low": rng - 0.1,
+        "Close": rng,
+        "Volume": [1000] * n,
+    })
+    df.attrs["symbol"] = "OB-USD"
+    df.attrs["timeframe"] = "1h"
+    return df
+
+
+def _ranging_oversold_frame(n: int = 80) -> pd.DataFrame:
+    rng = np.full(n, 100.0) + np.sin(np.linspace(0, 6, n)) * 1.5
+    rng[-3:] -= np.array([3.0, 5.5, 8.0])
+    df = pd.DataFrame({
+        "Datetime": pd.date_range(end=pd.Timestamp.utcnow(), periods=n, freq="h"),
+        "Open": rng + 0.05,
+        "High": rng + 0.1,
+        "Low": rng - 0.5,
+        "Close": rng,
+        "Volume": [1000] * n,
+    })
+    df.attrs["symbol"] = "OS-USD"
+    df.attrs["timeframe"] = "1h"
+    return df
+
+
+def test_mean_reversion_short_on_overbought():
+    """Mean-reversion now requires a ranging regime — fade RSI spikes inside chop."""
+    df = _ranging_overbought_frame()
     strat = MeanReversionStrategy()
-    sig = strat.generate_signal(overbought_ohlcv)
+    sig = strat.generate_signal(df)
     assert sig is not None
     assert sig.direction == "SHORT"
     assert sig.stop_loss > sig.entry_price  # Stop above entry for short
 
 
-def test_mean_reversion_long_on_oversold(oversold_ohlcv):
+def test_mean_reversion_long_on_oversold():
+    df = _ranging_oversold_frame()
     strat = MeanReversionStrategy()
-    sig = strat.generate_signal(oversold_ohlcv)
+    sig = strat.generate_signal(df)
     assert sig is not None
     assert sig.direction == "LONG"
     assert sig.stop_loss < sig.entry_price
+
+
+def test_mean_reversion_blocks_trending_regime(overbought_ohlcv):
+    """A pure linear ramp is classified as trending — must NOT short into it."""
+    strat = MeanReversionStrategy()
+    assert strat.generate_signal(overbought_ohlcv) is None
 
 
 def test_mean_reversion_no_signal_when_neutral(sample_ohlcv):
@@ -206,10 +248,11 @@ def test_multi_factor_strategy_type():
 def test_multi_factor_agrees_on_strong_uptrend(uptrend_ohlcv):
     strat = MultiFactorStrategy()
     sig = strat.generate_signal(uptrend_ohlcv)
-    # Strong uptrend with MACD+SMA agreeing often produces a LONG; may not always reach 4/5.
+    # Strong uptrend with MACD+SMA agreeing should produce a LONG. Threshold is
+    # 3/5 agreement; strength is bullish_count / total_signals.
     if sig:
         assert sig.direction == "LONG"
-        assert sig.strength >= 4 / 6  # Needed agreement threshold
+        assert sig.strength >= MultiFactorStrategy.AGREEMENT_THRESHOLD / 5
 
 
 def test_multi_factor_respects_agent_decision():
@@ -369,18 +412,19 @@ def test_adaptive_params_override_timeframe_defaults():
 # ─────────────────────── VWAP Reversion strategy ───────────────────────
 
 
-def _vwap_long_frame(n: int = 60) -> pd.DataFrame:
-    """Frame where price sits well below VWAP and RSI is low (oversold)."""
-    # Ramp up strongly for the first part, then drop sharply — pushes VWAP up
-    # (biased by high-volume upper bars) and current price down (low RSI).
-    ramp = np.linspace(100, 150, n - 10)
-    drop = np.linspace(150, 120, 10)
-    prices = np.concatenate([ramp, drop])
-    volumes = np.concatenate([np.full(n - 10, 10000.0), np.full(10, 1000.0)])
+def _vwap_long_frame(n: int = 80) -> pd.DataFrame:
+    """Range-bound frame where last bar is well below VWAP with oversold RSI."""
+    rng = 100.0 + np.sin(np.linspace(0, 6, n - 6)) * 1.5
+    drop = np.array([99.0, 97.0, 94.5, 92.0, 89.0, 86.0])
+    prices = np.concatenate([rng, drop])
+    # Higher volume on upper bars pushes VWAP up; final drop is on lower volume.
+    volumes = np.full(n, 5000.0)
+    volumes[-6:] = 1000.0
     df = pd.DataFrame({
-        "Open": prices + 0.1,
-        "High": prices + 0.3,
-        "Low": prices - 0.3,
+        "Datetime": pd.date_range(end=pd.Timestamp.utcnow(), periods=n, freq="h"),
+        "Open": prices + 0.05,
+        "High": prices + 0.2,
+        "Low": prices - 0.2,
         "Close": prices,
         "Volume": volumes,
     })
@@ -389,16 +433,18 @@ def _vwap_long_frame(n: int = 60) -> pd.DataFrame:
     return df
 
 
-def _vwap_short_frame(n: int = 60) -> pd.DataFrame:
-    """Frame where price sits above VWAP and RSI is high (overbought)."""
-    down = np.linspace(150, 100, n - 10)
-    spike = np.linspace(100, 130, 10)
-    prices = np.concatenate([down, spike])
-    volumes = np.concatenate([np.full(n - 10, 10000.0), np.full(10, 1000.0)])
+def _vwap_short_frame(n: int = 80) -> pd.DataFrame:
+    """Range-bound frame where last bar is well above VWAP with overbought RSI."""
+    rng = 100.0 + np.sin(np.linspace(0, 6, n - 6)) * 1.5
+    spike = np.array([101.0, 103.0, 105.5, 108.0, 111.0, 114.0])
+    prices = np.concatenate([rng, spike])
+    volumes = np.full(n, 5000.0)
+    volumes[-6:] = 1000.0
     df = pd.DataFrame({
-        "Open": prices - 0.1,
-        "High": prices + 0.3,
-        "Low": prices - 0.3,
+        "Datetime": pd.date_range(end=pd.Timestamp.utcnow(), periods=n, freq="h"),
+        "Open": prices - 0.05,
+        "High": prices + 0.2,
+        "Low": prices - 0.2,
         "Close": prices,
         "Volume": volumes,
     })
@@ -450,19 +496,21 @@ def _bb_squeeze_breakout_frame(n: int = 80, direction: str = "LONG") -> pd.DataF
     """
     # Perfectly flat price keeps every prior bar's width at 0 (in the
     # bottom 20th percentile by definition), then the final spike pushes
-    # the latest width above zero — a clean squeeze release.
+    # the latest width above zero — a clean squeeze release. Volume spike
+    # on the breakout bar satisfies the volume-confirmation gate.
     flat = np.full(n - 1, 100.0)
     if direction == "LONG":
         spike = np.array([110.0])
     else:
         spike = np.array([90.0])
     prices = np.concatenate([flat, spike])
+    volumes = [1000] * (n - 1) + [3000]
     df = pd.DataFrame({
         "Open": prices,
         "High": prices + 0.1,
         "Low": prices - 0.1,
         "Close": prices,
-        "Volume": [1000] * n,
+        "Volume": volumes,
     })
     df.attrs["symbol"] = "BB-USD"
     df.attrs["timeframe"] = "1h"

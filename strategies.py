@@ -419,13 +419,19 @@ class MomentumStrategy(BaseStrategy):
 
 class MeanReversionStrategy(BaseStrategy):
     """
-    Mean Reversion strategy: Fade RSI extremes.
-    RSI > 70 → short, RSI < 30 → long.
-    Best on 1hr timeframe.
+    Mean Reversion strategy: Fade RSI extremes inside ranging regimes.
+
+    LONG when RSI < oversold AND Stoch %K < 15 (deep oversold) AND we're not
+    in a strong trend. SHORT mirrors. The deeper Stoch threshold (was 20)
+    cut win-rate-degrading marginal entries in backtest.
+
+    Best on 1h–4h timeframes.
     """
 
     RSI_OVERBOUGHT = 70
     RSI_OVERSOLD = 30
+    STOCH_DEEP_HIGH = 85.0
+    STOCH_DEEP_LOW = 15.0
 
     def __init__(self):
         super().__init__(StrategyType.MEAN_REVERSION)
@@ -438,6 +444,15 @@ class MeanReversionStrategy(BaseStrategy):
         adaptive_params: Optional[Dict[str, float]] = None,
     ) -> Optional[Signal]:
         if len(df) < 20:
+            return None
+
+        # Skip strong trends — fading them is the dominant loss mode.
+        try:
+            from regime_detector import RegimeDetector
+            regime = RegimeDetector().classify(df)
+        except Exception:
+            regime = "unknown"
+        if regime in ("trending_up", "trending_down"):
             return None
 
         indicators = indicator_data or self._compute_indicators(df)
@@ -456,7 +471,7 @@ class MeanReversionStrategy(BaseStrategy):
         sl_mult = float(params["sl_atr_mult"])
 
         # Overbought → SHORT
-        if rsi > overbought and stoch_k > 80:
+        if rsi > overbought and stoch_k > self.STOCH_DEEP_HIGH:
             stop_loss = current_price + sl_mult * atr
             take_profit = sma_20  # Revert to mean (SMA20)
             rr = abs(current_price - take_profit) / abs(stop_loss - current_price) if stop_loss != current_price else 1.0
@@ -479,7 +494,7 @@ class MeanReversionStrategy(BaseStrategy):
             )
         
         # Oversold → LONG
-        elif rsi < oversold and stoch_k < 20:
+        elif rsi < oversold and stoch_k < self.STOCH_DEEP_LOW:
             stop_loss = current_price - sl_mult * atr
             take_profit = sma_20  # Revert to mean
             rr = abs(take_profit - current_price) / abs(current_price - stop_loss) if current_price != stop_loss else 1.0
@@ -509,7 +524,7 @@ class BreakoutStrategy(BaseStrategy):
     Breakout strategy: Enter on breakout from consolidation patterns.
     Uses price range compression + volume confirmation.
     """
-    
+
     def __init__(self):
         super().__init__(StrategyType.BREAKOUT)
 
@@ -535,23 +550,26 @@ class BreakoutStrategy(BaseStrategy):
         params = _resolve_params(adaptive_params, df.attrs.get("timeframe"))
         sl_mult = float(params["sl_atr_mult"])
 
-        # Detect consolidation: recent range is narrow
+        # Detect consolidation: recent range is narrow.
+        # Critical: exclude the *current* bar so the breakout test
+        # (current close > prior range) isn't comparing the bar against itself.
         lookback = 20
-        recent_high = np.max(high[-lookback:])
-        recent_low = np.min(low[-lookback:])
+        prior_high = high[-(lookback + 1):-1]
+        prior_low = low[-(lookback + 1):-1]
+        if len(prior_high) < lookback:
+            return None
+        recent_high = float(np.max(prior_high))
+        recent_low = float(np.min(prior_low))
         range_pct = (recent_high - recent_low) / recent_low if recent_low > 0 else 0
-        
-        # Short-term range (last 5 bars)
-        short_high = np.max(high[-5:])
-        short_low = np.min(low[-5:])
-        
+
         # Volume confirmation
         volume_ratio = indicators.get("volume_ratio", 1.0)
         volume_confirmed = volume_ratio > 1.2  # 20% above average
-        
-        # Check for breakout
-        breakout_up = current_price > recent_high and range_pct < 0.15
-        breakout_down = current_price < recent_low and range_pct < 0.15
+
+        # Breakout: current close pierces the prior consolidation range AND
+        # the range itself was tight (< 12% from low to high).
+        breakout_up = current_price > recent_high and range_pct < 0.12
+        breakout_down = current_price < recent_low and range_pct < 0.12
         
         # Also check using pattern agent report if available
         pattern_bullish = False
@@ -623,11 +641,14 @@ class BreakoutStrategy(BaseStrategy):
 class MultiFactorStrategy(BaseStrategy):
     """
     Multi-Factor strategy: Weighted scoring from all agents.
-    Only trade when 4/5 signals agree on direction.
+    Only trade when at least ``AGREEMENT_THRESHOLD`` of 5 signals agree on
+    direction. Threshold of 3 gives a meaningful sample of trades while still
+    requiring majority confluence; combined with the trend-alignment gate this
+    keeps quality high without producing only 1-2 trades per symbol.
     """
-    
-    AGREEMENT_THRESHOLD = 4  # Need 4 out of 5 signals
-    
+
+    AGREEMENT_THRESHOLD = 3
+
     def __init__(self):
         super().__init__(StrategyType.MULTI_FACTOR)
 
@@ -736,14 +757,20 @@ class MultiFactorStrategy(BaseStrategy):
         # Count agreements
         bullish_count = sum(1 for s in scores if s > 0)
         bearish_count = sum(1 for s in scores if s < 0)
-        
+
         total_signals = len(scores)
-        
-        if bullish_count >= self.AGREEMENT_THRESHOLD:
+
+        # Trend-alignment gate: ``scores[2]`` is the SMA-based trend factor.
+        # Backtest showed that a 3/5 confluence without trend agreement bled
+        # in choppy regimes (DIA, AMZN, GOOGL); requiring the trend factor to
+        # be on the same side of the trade as the count majority cuts those.
+        trend_score = scores[2] if len(scores) > 2 else 0
+
+        if bullish_count >= self.AGREEMENT_THRESHOLD and trend_score > 0:
             stop_loss = current_price - sl_mult * atr
             take_profit = current_price + tp_mult * atr
             rr = (take_profit - current_price) / (current_price - stop_loss) if current_price > stop_loss else 1.5
-            
+
             return Signal(
                 direction="LONG",
                 strength=bullish_count / total_signals,
@@ -757,12 +784,12 @@ class MultiFactorStrategy(BaseStrategy):
                 reasoning=f"Multi-Factor LONG: {bullish_count}/{total_signals} agree. " + "; ".join(reasons),
                 metadata={**indicators, "scores": scores},
             )
-        
-        elif bearish_count >= self.AGREEMENT_THRESHOLD:
+
+        elif bearish_count >= self.AGREEMENT_THRESHOLD and trend_score < 0:
             stop_loss = current_price + sl_mult * atr
             take_profit = current_price - tp_mult * atr
             rr = (current_price - take_profit) / (stop_loss - current_price) if stop_loss > current_price else 1.5
-            
+
             return Signal(
                 direction="SHORT",
                 strength=bearish_count / total_signals,
@@ -776,7 +803,7 @@ class MultiFactorStrategy(BaseStrategy):
                 reasoning=f"Multi-Factor SHORT: {bearish_count}/{total_signals} agree. " + "; ".join(reasons),
                 metadata={**indicators, "scores": scores},
             )
-        
+
         return None
 
 
@@ -1223,13 +1250,20 @@ class VWAPReversionStrategy(BaseStrategy):
 
     Stop: 1.5x ATR from entry. Target: VWAP (mean reversion goal).
     Works best on intraday frames (5m/15m/1h/4h) where VWAP carries information.
+
+    A regime filter (skip ``trending_up``/``trending_down``) is applied so the
+    strategy does not fade clear trends — backtest showed this is where it
+    bleeds the most. R:R floor of 1.5 also rejects setups where VWAP sits too
+    close to current price relative to the ATR stop.
     """
+
+    MIN_RR = 1.5
 
     def __init__(
         self,
-        vwap_band_pct: float = 0.02,   # 2% deviation from VWAP
-        rsi_overbought: float = 60.0,
-        rsi_oversold: float = 40.0,
+        vwap_band_pct: float = 0.025,   # 2.5% deviation from VWAP
+        rsi_overbought: float = 70.0,
+        rsi_oversold: float = 30.0,
         sl_atr_mult: float = 1.5,
     ):
         super().__init__(StrategyType.VWAP_REVERSION)
@@ -1237,6 +1271,15 @@ class VWAPReversionStrategy(BaseStrategy):
         self.rsi_overbought = rsi_overbought
         self.rsi_oversold = rsi_oversold
         self.sl_atr_mult = sl_atr_mult
+
+    def _regime_blocks_reversion(self, df: pd.DataFrame) -> bool:
+        """True when the prevailing regime makes mean-reversion costly."""
+        try:
+            from regime_detector import RegimeDetector
+            regime = RegimeDetector().classify(df)
+        except Exception:
+            return False
+        return regime in ("trending_up", "trending_down")
 
     def generate_signal(
         self,
@@ -1246,6 +1289,10 @@ class VWAPReversionStrategy(BaseStrategy):
         adaptive_params: Optional[Dict[str, float]] = None,
     ) -> Optional[Signal]:
         if len(df) < 20 or "Volume" not in df.columns:
+            return None
+
+        # Don't fight trending regimes — that's where this strategy bleeds.
+        if self._regime_blocks_reversion(df):
             return None
 
         indicators = indicator_data or self._compute_indicators(df)
@@ -1266,6 +1313,8 @@ class VWAPReversionStrategy(BaseStrategy):
             if take_profit <= current_price:
                 return None
             rr = (take_profit - current_price) / max(current_price - stop_loss, 1e-9)
+            if rr < self.MIN_RR:
+                return None
             strength = float(
                 np.clip(0.4 + 0.3 * min(1.0, abs(deviation) / 0.05)
                         + 0.3 * min(1.0, (self.rsi_oversold - rsi) / 20.0), 0.0, 1.0)
@@ -1294,6 +1343,8 @@ class VWAPReversionStrategy(BaseStrategy):
             if take_profit >= current_price:
                 return None
             rr = (current_price - take_profit) / max(stop_loss - current_price, 1e-9)
+            if rr < self.MIN_RR:
+                return None
             strength = float(
                 np.clip(0.4 + 0.3 * min(1.0, deviation / 0.05)
                         + 0.3 * min(1.0, (rsi - self.rsi_overbought) / 20.0), 0.0, 1.0)
@@ -1438,7 +1489,11 @@ class EMACrossoverStrategy(BaseStrategy):
     Classical EMA(9)/EMA(21) crossover trend follower.
 
     LONG when fast EMA crosses above slow EMA, confirmed by a positive MACD
-    histogram and volume above its 20-bar average. SHORT on the mirror image.
+    histogram, volume above its 20-bar average, AND the price is on the bull
+    side of the slower SMA50 (trend alignment). SHORT mirrors that.
+
+    Trend alignment cuts the dominant loss mode — counter-trend crossovers
+    that immediately whipsaw.
 
     Stop: 2x ATR; target: 3x ATR (so R:R = 1.5 by construction).
     """
@@ -1496,6 +1551,7 @@ class EMACrossoverStrategy(BaseStrategy):
         volume_ratio = float(indicators.get("volume_ratio", 1.0))
         atr = float(indicators.get("atr", float(close[-1]) * 0.02))
         current_price = float(close[-1])
+        sma_50 = float(indicators.get("sma_50", current_price))
 
         # Confirm with MACD direction AND volume > average.
         if volume_ratio < self.volume_mult:
@@ -1508,7 +1564,9 @@ class EMACrossoverStrategy(BaseStrategy):
         if tp_mult < sl_mult * 1.5:
             tp_mult = sl_mult * 1.5
 
-        if bullish_cross and macd_hist > 0:
+        # Trend alignment: only take crossovers in the direction of the
+        # longer-term trend (price relative to SMA50).
+        if bullish_cross and macd_hist > 0 and current_price >= sma_50:
             stop_loss = current_price - sl_mult * atr
             take_profit = current_price + tp_mult * atr
             rr = (take_profit - current_price) / max(current_price - stop_loss, 1e-9)
@@ -1534,7 +1592,7 @@ class EMACrossoverStrategy(BaseStrategy):
                           "ema_slow": float(slow[-1])},
             )
 
-        if bearish_cross and macd_hist < 0:
+        if bearish_cross and macd_hist < 0 and current_price <= sma_50:
             stop_loss = current_price + sl_mult * atr
             take_profit = current_price - tp_mult * atr
             if take_profit <= 0:

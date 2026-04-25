@@ -115,7 +115,7 @@ MARKETS: Dict[str, MarketConfig] = {
     "ENA-USD": _crypto("ENA-USD", "Ethena", "crypto_defi"),
     "ONDO-USD": _crypto("ONDO-USD", "Ondo Finance", "crypto_defi"),
     "DYDX-USD": _crypto("DYDX-USD", "dYdX", "crypto_defi"),
-    "JUP-USD": _crypto("JUP-USD", "Jupiter", "crypto_defi"),
+    # JUP-USD removed — delisted per yfinance (2026-04-24)
     "RUNE-USD": _crypto("RUNE-USD", "THORChain", "crypto_defi"),
 
     # --- Tier 2c: Infrastructure ---

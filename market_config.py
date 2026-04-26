@@ -226,6 +226,56 @@ MARKETS: Dict[str, MarketConfig] = {
         scan_interval_hours=4.0,
         correlation_group="forex",
     ),
+    # Forex universe expansion (REL-377): forex was the highest-Sharpe asset
+    # class in the 2026-04-25 backtest (momentum +0.46, bb_squeeze +0.38).
+    "USDJPY=X": MarketConfig(
+        symbol="USDJPY=X",
+        display_name="USD/JPY",
+        category=MarketCategory.FOREX,
+        timeframes=["4h"],
+        scan_interval_hours=4.0,
+        correlation_group="forex",
+    ),
+    "AUDUSD=X": MarketConfig(
+        symbol="AUDUSD=X",
+        display_name="AUD/USD",
+        category=MarketCategory.FOREX,
+        timeframes=["4h"],
+        scan_interval_hours=4.0,
+        correlation_group="forex",
+    ),
+    "USDCAD=X": MarketConfig(
+        symbol="USDCAD=X",
+        display_name="USD/CAD",
+        category=MarketCategory.FOREX,
+        timeframes=["4h"],
+        scan_interval_hours=4.0,
+        correlation_group="forex",
+    ),
+    "USDCHF=X": MarketConfig(
+        symbol="USDCHF=X",
+        display_name="USD/CHF",
+        category=MarketCategory.FOREX,
+        timeframes=["4h"],
+        scan_interval_hours=4.0,
+        correlation_group="forex",
+    ),
+    "EURJPY=X": MarketConfig(
+        symbol="EURJPY=X",
+        display_name="EUR/JPY",
+        category=MarketCategory.FOREX,
+        timeframes=["4h"],
+        scan_interval_hours=4.0,
+        correlation_group="forex",
+    ),
+    "GBPJPY=X": MarketConfig(
+        symbol="GBPJPY=X",
+        display_name="GBP/JPY",
+        category=MarketCategory.FOREX,
+        timeframes=["4h"],
+        scan_interval_hours=4.0,
+        correlation_group="forex",
+    ),
 }
 
 

@@ -696,8 +696,11 @@ def test_check_stops_processes_old_trades_past_min_hold(tmp_db_path):
 # ─────────────────────── New constants ───────────────────────
 
 
-def test_max_positions_tightened_to_12():
-    assert PaperTradingEngine.MAX_POSITIONS == 12
+def test_max_positions_raised_to_20():
+    # Raised 2026-04-25 after observing 25h capacity-deadlock with cap=12.
+    # The bot accumulated 20 OPEN positions on its winning strategy and
+    # then silently dropped every new signal because slots_remaining==0.
+    assert PaperTradingEngine.MAX_POSITIONS == 20
 
 
 def test_min_position_size_raised_to_100():

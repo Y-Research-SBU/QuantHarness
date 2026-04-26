@@ -348,6 +348,35 @@ def test_execute_signals_keeps_signals_at_or_above_strength_floor(tmp_db_path):
     assert len(ids) == 1
 
 
+def test_execute_signals_logs_warning_when_at_capacity(tmp_db_path, caplog):
+    """When MAX_POSITIONS is exhausted, the scanner used to silently drop
+    every ranked signal with no log line, which masked a 25h trade-flow
+    deadlock in production. We now emit a WARNING so capacity stalls are
+    visible in tail -f / log scanners."""
+    import logging
+    from strategies import Signal
+    from scanner import MIN_SIGNAL_STRENGTH
+
+    scanner = MarketScanner(db_path=tmp_db_path)
+    # Simulate cap reached.
+    scanner.engine.MAX_POSITIONS = 0
+
+    sig = Signal(
+        direction="LONG", strength=MIN_SIGNAL_STRENGTH + 0.3,
+        strategy=StrategyType.MOMENTUM,
+        symbol="BTC-USD", timeframe="4h",
+        entry_price=100.0, stop_loss=95.0, take_profit=120.0,
+        risk_reward_ratio=2.0, reasoning="ok", metadata={},
+    )
+    with caplog.at_level(logging.WARNING, logger="scanner"):
+        ids = scanner.execute_signals([sig])
+
+    assert ids == []
+    assert any(
+        "MAX_POSITIONS capacity" in rec.message for rec in caplog.records
+    ), f"Expected capacity warning, got: {[r.message for r in caplog.records]}"
+
+
 # ── L1 evolution filter tests ──
 
 def test_scan_market_filters_disabled_strategies(tmp_db_path, monkeypatch):

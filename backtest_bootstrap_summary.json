@@ -1,0 +1,43 @@
+{
+  "total_simulated_trades": 19592,
+  "closed_trades": 19592,
+  "by_market": {
+    "AAPL": 271,
+    "ADA-USD": 730,
+    "AMD": 265,
+    "AMZN": 283,
+    "ATOM-USD": 1240,
+    "AVAX-USD": 2125,
+    "BTC-USD": 648,
+    "CL=F": 914,
+    "DOGE-USD": 1925,
+    "DOT-USD": 2083,
+    "ETH-USD": 1662,
+    "GC=F": 1026,
+    "GOOGL": 170,
+    "LINK-USD": 1980,
+    "NEAR-USD": 1133,
+    "NVDA": 291,
+    "QQQ": 316,
+    "SOL-USD": 1926,
+    "SPY": 291,
+    "TSLA": 313
+  },
+  "strategy_weights": {
+    "mean_reversion": 1.0,
+    "momentum": 0.5,
+    "multi_factor": 0.0
+  },
+  "disabled_strategies": [
+    "multi_factor"
+  ],
+  "model_accuracy": 0.567,
+  "regime_distribution": {
+    "ranging": 63,
+    "trending_down": 4,
+    "trending_up": 17,
+    "volatile": 34
+  },
+  "kronos_hit_rate": 0.0,
+  "kronos_n": 0
+}

@@ -489,6 +489,15 @@ class MarketScanner:
         current_open = len(self.engine.get_open_positions())
         slots_remaining = max(0, self.engine.MAX_POSITIONS - current_open)
         if slots_remaining == 0:
+            # Make capacity-deadlock visible. Without this log, a bot that
+            # over-fills MAX_POSITIONS goes quiet for hours with no signal
+            # ever turning into a trade and no error to grep for.
+            if ranked:
+                logger.warning(
+                    "At MAX_POSITIONS capacity (%d open, cap=%d) \u2014 "
+                    "dropping %d ranked signals this scan",
+                    current_open, self.engine.MAX_POSITIONS, len(ranked),
+                )
             return []
 
         trade_ids: List[int] = []

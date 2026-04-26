@@ -2,8 +2,13 @@
 Strategy whitelist derived from 5-year backtest (2026-04-25).
 
 Source: backtest_results/backtest_optimized_v2_20260425_155648.json
+Forex expansion (REL-377): backtest_results/backtest_REL377-forex_20260426_002956.json
 Filter: Sharpe ratio >= 0.30 AND total_trades >= 10
-Result: 99 cells across 52 symbols (out of 457 candidate cells)
+Result: 109 cells across 58 symbols
+  - Base whitelist from the original 5y backtest
+  - REL-377 forex expansion added 7 cells across 5 new forex symbols
+    (AUDUSD=X, USDCAD=X, USDCHF=X, EURJPY=X, GBPJPY=X). USDJPY=X was
+    backtested but no strategy cleared the Sharpe>=0.30/trades>=10 bar.
 
 Selected portfolio metrics (equal-weight on these cells):
   Mean Sharpe:    +0.56
@@ -51,9 +56,12 @@ WHITELIST: Dict[str, FrozenSet[str]] = {
     "EIGEN-USD": frozenset({"ema_crossover"}),
     "ENA-USD": frozenset({"multi_factor", "momentum"}),
     "ETH-USD": frozenset({"vwap_reversion", "bb_squeeze", "multi_factor"}),
+    "AUDUSD=X": frozenset({"ema_crossover"}),  # REL-377: sharpe +0.58, 29 trades
+    "EURJPY=X": frozenset({"mean_reversion"}),  # REL-377: sharpe +0.55, 50 trades
     "EURUSD=X": frozenset({"mean_reversion", "ema_crossover"}),
     "FET-USD": frozenset({"bb_squeeze", "vwap_reversion"}),
     "FLOKI-USD": frozenset({"bb_squeeze", "ema_crossover"}),
+    "GBPJPY=X": frozenset({"mean_reversion", "vwap_reversion", "ema_crossover"}),  # REL-377: sharpe +0.52/+0.44/+0.37
     "GBPUSD=X": frozenset({"bb_squeeze", "momentum", "multi_factor"}),
     "GC=F": frozenset({"breakout", "multi_factor", "bb_squeeze"}),
     "GOOGL": frozenset({"momentum"}),
@@ -79,6 +87,8 @@ WHITELIST: Dict[str, FrozenSet[str]] = {
     "TIA-USD": frozenset({"mean_reversion"}),
     "TSLA": frozenset({"bb_squeeze", "multi_factor"}),
     "TURBO-USD": frozenset({"ema_crossover", "bb_squeeze"}),
+    "USDCAD=X": frozenset({"vwap_reversion"}),  # REL-377: sharpe +0.72, 15 trades
+    "USDCHF=X": frozenset({"mean_reversion"}),  # REL-377: sharpe +0.66, 44 trades
     "WIF-USD": frozenset({"ema_crossover"}),
     "WLD-USD": frozenset({"ema_crossover", "bb_squeeze", "multi_factor", "momentum"}),
     "XLE": frozenset({"vwap_reversion"}),

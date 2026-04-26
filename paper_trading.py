@@ -38,7 +38,7 @@ class PaperTradingEngine:
     MASTER_SYMBOL = "__MASTER__"
     MASTER_INITIAL_BALANCE = 10000.0
 
-    MAX_POSITIONS = 12              # Max concurrent open positions across all markets
+    MAX_POSITIONS = 20              # Max concurrent open positions across all markets (raised 2026-04-25 after capacity-deadlock observed)
     MAX_POSITION_SIZE = 500.0       # Max $ per position
     MIN_POSITION_SIZE = 100.0       # Min $ per position
     MAX_EXPOSURE_PCT = 0.60         # Max 60% of master portfolio deployed at once

@@ -1362,17 +1362,78 @@ def create_app(
 
     @app.route("/api/sync", methods=["POST"])
     def api_sync():
-        """Accept a SQLite DB upload from the local runner for remote sync."""
+        """Accept SQLite DB(s) and tournament state.json files from the local runner.
+
+        Multipart form field semantics::
+
+            db                                 -> main paper_trades.db (legacy)
+            instance_db_<name>                 -> per-instance paper_trades_<name>.db
+            instance_state_<name>              -> instances/<name>/state.json
+
+        Multiple instance files can be uploaded in a single request. Filenames
+        are ignored — destination paths are derived from the form field name to
+        prevent path traversal.
+        """
         sync_token = os.environ.get("SYNC_TOKEN", "")
         if sync_token and flask_request.headers.get("X-Sync-Token") != sync_token:
             return jsonify({"error": "unauthorized"}), 401
-        if "db" not in flask_request.files:
-            return jsonify({"error": "no db file in request"}), 400
-        db_file = flask_request.files["db"]
-        db_path = Path(app.config["DB_PATH"])
-        db_file.save(str(db_path))
-        logger.info("DB synced from remote (%d bytes)", db_path.stat().st_size)
-        return jsonify({"status": "ok", "size": db_path.stat().st_size})
+
+        # Allow tests to redirect instance writes by setting INSTANCE_ROOT in
+        # app.config; production uses the repo root next to dashboard.py.
+        repo_root = Path(
+            app.config.get("INSTANCE_ROOT")
+            or Path(__file__).resolve().parent
+        )
+        synced: Dict[str, int] = {}
+
+        # Legacy single-DB path
+        if "db" in flask_request.files:
+            db_file = flask_request.files["db"]
+            db_path = Path(app.config["DB_PATH"])
+            db_file.save(str(db_path))
+            synced["db"] = db_path.stat().st_size
+            logger.info("main DB synced (%d bytes)", synced["db"])
+
+        # Per-instance DBs and state files
+        # Instance name allow-list comes from on-disk instance dirs to prevent
+        # arbitrary writes via crafted form names.
+        try:
+            from profile_loader import ProfileLoader
+            valid_instances = set(ProfileLoader().list_profiles())
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("could not load instance allow-list: %s", exc)
+            valid_instances = set()
+
+        for field_name, file_storage in flask_request.files.items():
+            if field_name == "db":
+                continue
+            if field_name.startswith("instance_db_"):
+                name = field_name[len("instance_db_"):]
+                if name not in valid_instances:
+                    logger.warning("rejected instance_db for unknown profile %r", name)
+                    continue
+                dest = repo_root / f"paper_trades_{name}.db"
+                file_storage.save(str(dest))
+                synced[field_name] = dest.stat().st_size
+                logger.info("instance DB %s synced (%d bytes)", name, synced[field_name])
+            elif field_name.startswith("instance_state_"):
+                name = field_name[len("instance_state_"):]
+                if name not in valid_instances:
+                    logger.warning("rejected instance_state for unknown profile %r", name)
+                    continue
+                dest_dir = repo_root / "instances" / name
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                dest = dest_dir / "state.json"
+                file_storage.save(str(dest))
+                synced[field_name] = dest.stat().st_size
+                logger.info("instance state %s synced (%d bytes)", name, synced[field_name])
+            else:
+                logger.warning("ignored unknown sync field %r", field_name)
+
+        if not synced:
+            return jsonify({"error": "no recognized files in request"}), 400
+
+        return jsonify({"status": "ok", "synced": synced})
 
     @app.route("/static/<path:filename>")
     def static_files(filename):

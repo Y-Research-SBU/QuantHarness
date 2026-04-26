@@ -370,6 +370,87 @@ class TestDBSyncEndpoint:
         )
         assert r.status_code == 200
 
+    def test_sync_writes_per_instance_db_and_state(self, tmp_db_path, tmp_path):
+        """POST /api/sync with instance_db_<name> + instance_state_<name> →
+        dashboard's tournament leaderboard reflects the synced heartbeat.
+        """
+        # Prepare a fake instance dir with profile.py so ProfileLoader picks it up.
+        instance_root = tmp_path / "isolated"
+        instance_root.mkdir()
+        (instance_root / "instances").mkdir()
+        baseline_dir = instance_root / "instances" / "baseline"
+        baseline_dir.mkdir()
+        # Minimal profile.py that re-uses the real Profile dataclass.
+        (baseline_dir / "profile.py").write_text(
+            "from instances.profile import Profile\n"
+            "PROFILE = Profile(name='baseline', db_path='paper_trades_baseline.db')\n"
+        )
+
+        backtest_dir = tmp_path / "bt"
+        backtest_dir.mkdir()
+        app = dashboard.create_app(db_path=tmp_db_path, backtest_dir=str(backtest_dir))
+        app.config["INSTANCE_ROOT"] = str(instance_root)
+        client = app.test_client()
+
+        # Build a dummy DB file (raw bytes are fine — we only check it lands).
+        db_payload = b"SQLite format 3\x00" + b"x" * 64
+        state_payload = json.dumps({
+            "pid": 12345,
+            "last_heartbeat": "2026-04-26T07:00:00",
+            "equity": 9999.5,
+            "open_positions": 4,
+            "realized_pnl": -0.5,
+            "total_trades": 7,
+            "db_path": "paper_trades_baseline.db",
+        }).encode()
+
+        r = client.post(
+            "/api/sync",
+            data={
+                "instance_db_baseline": (io.BytesIO(db_payload), "x.db"),
+                "instance_state_baseline": (io.BytesIO(state_payload), "state.json"),
+            },
+            content_type="multipart/form-data",
+        )
+        assert r.status_code == 200
+        body = r.get_json()
+        assert body["status"] == "ok"
+        assert "instance_db_baseline" in body["synced"]
+        assert "instance_state_baseline" in body["synced"]
+
+        # Files actually landed on disk under the redirected root.
+        landed_db = instance_root / "paper_trades_baseline.db"
+        landed_state = instance_root / "instances" / "baseline" / "state.json"
+        assert landed_db.exists()
+        assert landed_state.exists()
+        state = json.loads(landed_state.read_text())
+        assert state["pid"] == 12345
+        assert state["equity"] == 9999.5
+
+    def test_sync_rejects_unknown_instance(self, tmp_db_path, tmp_path):
+        """Unknown instance names must be silently dropped (no path traversal)."""
+        instance_root = tmp_path / "isolated"
+        (instance_root / "instances").mkdir(parents=True)
+        # Note: no profile.py created → ProfileLoader sees zero valid instances.
+
+        backtest_dir = tmp_path / "bt"
+        backtest_dir.mkdir()
+        app = dashboard.create_app(db_path=tmp_db_path, backtest_dir=str(backtest_dir))
+        app.config["INSTANCE_ROOT"] = str(instance_root)
+        client = app.test_client()
+
+        r = client.post(
+            "/api/sync",
+            data={
+                "instance_db_evil": (io.BytesIO(b"x"), "x.db"),
+                "instance_state_../../etc/passwd": (io.BytesIO(b"x"), "x.json"),
+            },
+            content_type="multipart/form-data",
+        )
+        assert r.status_code == 400  # nothing recognized landed
+        # Critically: no file should have been written.
+        assert not (instance_root / "paper_trades_evil.db").exists()
+
 
 # ══════════════════════════════════════════════════════════════════════
 # Cross-module: scanner → engine → dashboard

@@ -178,6 +178,13 @@
       $('ov-pnl-pct').textContent = signFmtPct(pnlPct);
       $('ov-pnl-pct').className = `text-xs monospace ${pnlClass(totalPnl)}`;
     }
+    if ($('ov-unrealized')) {
+      $('ov-unrealized').textContent = signFmtUSD(unrealized);
+      $('ov-unrealized').className = `text-2xl font-bold monospace ${pnlClass(unrealized)}`;
+    }
+    if ($('ov-realized')) {
+      $('ov-realized').textContent = `realized: ${signFmtUSD(realizedPnl)}`;
+    }
 
     const bar = $('ov-indicator-bar');
     if (bar) {
@@ -199,6 +206,15 @@
       $('ov-pnl').className = `text-2xl font-bold monospace ${pnlClass(d.total_pnl)}`;
       $('ov-pnl-pct').textContent = signFmtPct(d.total_pnl_pct);
       $('ov-pnl-pct').className = `text-xs monospace ${pnlClass(d.total_pnl)}`;
+      const unrealizedVal = Number(d.unrealized_pnl || 0);
+      const realizedVal = Number(d.realized_pnl || 0);
+      if ($('ov-unrealized')) {
+        $('ov-unrealized').textContent = signFmtUSD(unrealizedVal);
+        $('ov-unrealized').className = `text-2xl font-bold monospace ${pnlClass(unrealizedVal)}`;
+      }
+      if ($('ov-realized')) {
+        $('ov-realized').textContent = `realized: ${signFmtUSD(realizedVal)}`;
+      }
       $('ov-open').textContent = fmtNum(d.open_positions);
       $('ov-markets').textContent = fmtNum(d.markets_tracked);
       $('ov-signals').textContent = fmtNum(d.signals_last_hour);

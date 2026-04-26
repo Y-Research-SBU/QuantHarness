@@ -29,8 +29,10 @@ from strategies import Signal
 
 
 def _sig(symbol: str, direction: str, strategy: StrategyType, entry: float = 100.0) -> Signal:
-    stop = entry * (0.98 if direction == "LONG" else 1.02)
-    tp = entry * (1.04 if direction == "LONG" else 0.96)
+    # Crypto floor (PaperTradingEngine.MIN_STOP_PCT['crypto']) is 3%; use 4%
+    # to leave headroom and keep this fixture symbol-agnostic.
+    stop = entry * (0.96 if direction == "LONG" else 1.04)
+    tp = entry * (1.08 if direction == "LONG" else 0.92)
     return Signal(
         direction=direction,
         strength=0.7,
@@ -46,7 +48,7 @@ def _sig(symbol: str, direction: str, strategy: StrategyType, entry: float = 100
     )
 
 
-def _pos(size: float = 500.0, qty: float = 5.0, stop: float = 98.0, tp: float = 104.0) -> PositionSizeResult:
+def _pos(size: float = 500.0, qty: float = 5.0, stop: float = 96.0, tp: float = 108.0) -> PositionSizeResult:
     return PositionSizeResult(
         position_size_usd=size,
         quantity=qty,

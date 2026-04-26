@@ -417,12 +417,18 @@ class TestFullScanCycle:
 class TestPositionSizingWithExecution:
     def test_position_size_respects_max_position_pct(self, engine):
         """calculate_position_size should cap at max_position_pct; execute_trade
-        can then consume it without exceeding cash."""
+        can then consume it without exceeding cash.
+
+        Stop is set to 97.0 (3%) — the minimum allowed for crypto by
+        PaperTradingEngine.MIN_STOP_PCT. Kelly with a 3% stop and 0.8
+        win rate / 3.0 RR still wants a position far above the 25% cap, so
+        the cap is what binds (which is what this test exists to prove).
+        """
         start = engine.get_master_portfolio()["current_balance"]
         pos = calculate_position_size(
             portfolio_balance=start,
             entry_price=100.0,
-            stop_loss_price=99.0,  # Tight stop → Kelly wants huge size.
+            stop_loss_price=97.0,  # Tight stop (at the crypto floor) → Kelly wants huge size.
             direction="LONG",
             win_rate=0.8,
             avg_win_loss_ratio=3.0,
@@ -431,7 +437,7 @@ class TestPositionSizingWithExecution:
         assert pos.position_size_usd <= start * 0.25 + 1e-6
 
         tid = engine.execute_trade(
-            _mk_signal(entry=100.0, stop=99.0, tp=103.0), pos
+            _mk_signal(entry=100.0, stop=97.0, tp=109.0), pos
         )
         assert tid is not None
         assert engine.get_master_portfolio()["current_balance"] >= 0

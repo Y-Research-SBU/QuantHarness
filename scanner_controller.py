@@ -103,18 +103,30 @@ class ScannerController:
         }
 
         # Build a lightweight portfolio + P&L summary (no heavy agent work).
+        #
+        # Capital lives on the master portfolio row (``__MASTER__``); the
+        # per-symbol rows returned by ``get_all_portfolios`` are pure
+        # P&L/analytics rows seeded with ``initial_balance=0.0``. Summing
+        # only the per-symbol rows therefore reports total capital as $0,
+        # which made the dashboard show "0 / 0" with portfolios > 0. We
+        # explicitly fold the master portfolio into the totals here.
         try:
             from paper_trading import PaperTradingEngine
 
             engine = PaperTradingEngine(db_path=self.db_path)
             portfolios = engine.get_all_portfolios()
+            master = engine.get_master_portfolio()
             open_positions = engine.get_open_positions()
 
-            total_balance = sum(p["current_balance"] for p in portfolios)
-            total_initial = sum(p["initial_balance"] for p in portfolios)
-            total_pnl = sum(p["total_pnl"] for p in portfolios)
-            total_trades = sum(p["total_trades"] for p in portfolios)
-            total_wins = sum(p["winning_trades"] for p in portfolios)
+            # All cumulative figures come from the master row — master and
+            # per-symbol rows are bumped in lockstep on every trade open/close,
+            # so summing both would double-count. The per-symbol rows are still
+            # included in ``portfolios`` count for the dashboard breakdown.
+            total_balance = float(master["current_balance"])
+            total_initial = float(master["initial_balance"])
+            total_pnl = float(master.get("total_pnl", 0.0))
+            total_trades = int(master.get("total_trades", 0))
+            total_wins = int(master.get("winning_trades", 0))
             win_rate = total_wins / total_trades if total_trades > 0 else 0.0
 
             summary = {

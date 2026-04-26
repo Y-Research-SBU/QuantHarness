@@ -67,8 +67,10 @@ def _mk_signal(
         symbol=symbol,
         timeframe="1h",
         entry_price=entry,
-        stop_loss=entry * (0.98 if direction == "LONG" else 1.02),
-        take_profit=entry * (1.04 if direction == "LONG" else 0.96),
+        # Crypto floor (PaperTradingEngine.MIN_STOP_PCT['crypto']) is 3%;
+        # use 4% so synthetic signals survive ``execute_trade`` validation.
+        stop_loss=entry * (0.96 if direction == "LONG" else 1.04),
+        take_profit=entry * (1.08 if direction == "LONG" else 0.92),
         risk_reward_ratio=2.0,
         reasoning="test",
         metadata=dict(metadata or {}),
@@ -76,6 +78,7 @@ def _mk_signal(
 
 
 def _mk_position(size: float = 500.0, qty: float = 5.0) -> PositionSizeResult:
+    # Stops widened to 4% to clear the 3% crypto floor in PaperTradingEngine.
     return PositionSizeResult(
         position_size_usd=size,
         quantity=qty,
@@ -83,8 +86,8 @@ def _mk_position(size: float = 500.0, qty: float = 5.0) -> PositionSizeResult:
         risk_pct=0.02,
         kelly_fraction=0.2,
         half_kelly=0.1,
-        stop_loss=98.0,
-        take_profit=104.0,
+        stop_loss=96.0,
+        take_profit=108.0,
         reason="test",
     )
 
@@ -171,8 +174,10 @@ def test_execute_signals_skips_disabled_strategy(scanner):
     })
     scanner.self_improver = fake
 
+    # Both signals must clear MIN_SIGNAL_STRENGTH (0.4) so the test exercises
+    # the disabled-strategy filter rather than the raw-strength floor.
     sig_momentum = _mk_signal(strategy=StrategyType.MOMENTUM, symbol="BTC-USD", strength=0.95)
-    sig_breakout = _mk_signal(strategy=StrategyType.BREAKOUT, symbol="ETH-USD", strength=0.3)
+    sig_breakout = _mk_signal(strategy=StrategyType.BREAKOUT, symbol="ETH-USD", strength=0.5)
     trade_ids = scanner.execute_signals([sig_momentum, sig_breakout])
 
     # Only the breakout signal should have made it to execute_trade.
@@ -309,8 +314,25 @@ def test_run_kronos_forecast_logs_prediction(tmp_db_path, monkeypatch):
     assert n == 1
 
 
-def test_close_trade_records_kronos_outcome(tmp_db_path):
-    """Closing a trade with kronos_prediction_id metadata must mark the outcome."""
+def test_close_trade_does_not_evaluate_kronos_immediately(tmp_db_path):
+    """Closing a trade must NOT mark its Kronos prediction.
+
+    REL-376 deliberately removed the close-time Kronos evaluation: the
+    prediction is about price at ``prediction_time + horizon * step``,
+    not the trade's exit price. Trades close at unrelated wall-clock
+    times (SL/TP/orphan-cleanup), so reading exit_price as the "actual"
+    locked predictions to NEUTRAL and broke accuracy reporting. Real
+    evaluation now lives in ``evaluate_pending_kronos_predictions``.
+
+    This regression test pins the new contract:
+      1. ``close_trade`` leaves ``correct = NULL`` on the prediction.
+      2. ``evaluate_pending_kronos_predictions`` resolves it later using
+         the price at the correct future timestamp (here, injected via
+         ``price_lookup``).
+    """
+    import pandas as pd
+    from db_schema import get_connection
+
     improver = SelfImprover(db_path=tmp_db_path)
     pred_id = improver.log_kronos_prediction(
         symbol="BTC-USD", timeframe="1h", predicted_direction="UP",
@@ -325,20 +347,57 @@ def test_close_trade_records_kronos_outcome(tmp_db_path):
     tid = engine.execute_trade(sig, _mk_position())
     assert tid is not None
 
-    # Close with a +3% move → actual_direction = UP, matching the prediction.
+    # Close the trade. Per REL-376 this must NOT touch kronos_predictions.
     result = engine.close_trade(tid, exit_price=103.0, reason="manual")
     assert result is not None
-
-    from db_schema import get_connection
     with get_connection(tmp_db_path) as conn:
         row = conn.execute(
             "SELECT correct, actual_direction, actual_magnitude FROM kronos_predictions WHERE id = ?",
             (pred_id,),
         ).fetchone()
-    assert row is not None
-    assert row["correct"] == 1
-    assert row["actual_direction"] == "UP"
-    assert abs(row["actual_magnitude"] - 3.0) < 0.01
+    assert row is not None, "prediction row vanished"
+    assert row["correct"] is None, "close_trade must defer Kronos evaluation"
+    assert row["actual_direction"] is None
+    assert row["actual_magnitude"] is None
+
+    # Now the deferred evaluator resolves it correctly with a price_lookup
+    # that returns a synthetic close at prediction_time + horizon (UP, +3%).
+    pred_time = pd.Timestamp(
+        improver._fetch_prediction_time(pred_id) if hasattr(improver, "_fetch_prediction_time")
+        else _read_prediction_time(tmp_db_path, pred_id)
+    )
+    target_time = pred_time + pd.Timedelta(hours=12)
+
+    def fake_price_lookup(symbol, interval, start, end):
+        # Anchor bar at prediction_time (close=100), target bar at target_time
+        # (close=103 → +3% → UP, matches the prediction).
+        idx = pd.DatetimeIndex([pred_time, target_time])
+        return pd.DataFrame({"Close": [100.0, 103.0]}, index=idx)
+
+    stats = improver.evaluate_pending_kronos_predictions(
+        now=target_time + pd.Timedelta(minutes=1),
+        price_lookup=fake_price_lookup,
+    )
+    assert stats["resolved"] == 1
+
+    with get_connection(tmp_db_path) as conn:
+        resolved = conn.execute(
+            "SELECT correct, actual_direction, actual_magnitude FROM kronos_predictions WHERE id = ?",
+            (pred_id,),
+        ).fetchone()
+    assert resolved["correct"] == 1
+    assert resolved["actual_direction"] == "UP"
+    assert abs(resolved["actual_magnitude"] - 3.0) < 0.01
+
+
+def _read_prediction_time(db_path: str, pred_id: int):
+    from db_schema import get_connection
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT prediction_time FROM kronos_predictions WHERE id = ?",
+            (pred_id,),
+        ).fetchone()
+    return row["prediction_time"]
 
 
 def test_close_trade_without_kronos_metadata_is_safe(tmp_db_path):
@@ -367,7 +426,9 @@ def test_mean_reversion_honors_adaptive_rsi_thresholds(monkeypatch):
     df = _fake_frame(n=80, base=100.0)
     indicators = {
         "rsi": 68.0,
-        "stoch_k": 85.0,
+        # STOCH_DEEP_HIGH is 85.0 with a strict ``>``; use 85.5 so the deep-
+        # stoch gate passes regardless of float rounding.
+        "stoch_k": 85.5,
         "atr": 1.0,
         "sma_20": 95.0,
     }

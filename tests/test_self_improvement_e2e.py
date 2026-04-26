@@ -170,10 +170,11 @@ def test_no_interference_with_trading_while_trades_open(tmp_db_path):
     # Open two trades — stay within correlation-group limits (max 2 per group).
     open_ids = []
     for sym, entry in (("BTC-USD", 100), ("ETH-USD", 50)):
+        # 4% stop / 8% TP — clears the 3% crypto floor in PaperTradingEngine.
         sig = Signal(
             direction="LONG", strength=0.7, strategy=StrategyType.MOMENTUM,
             symbol=sym, timeframe="1h", entry_price=float(entry),
-            stop_loss=entry * 0.98, take_profit=entry * 1.04,
+            stop_loss=entry * 0.96, take_profit=entry * 1.08,
             risk_reward_ratio=2.0, reasoning="open trade", metadata={"atr_pct": 0.02},
         )
         pos = PositionSizeResult(

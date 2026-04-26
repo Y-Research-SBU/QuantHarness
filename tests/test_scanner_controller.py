@@ -89,3 +89,69 @@ def test_reset_controller_releases_singleton(tmp_db_path):
     reset_controller()
     c2 = get_controller(db_path=tmp_db_path)
     assert c1 is not c2
+
+
+# ---------------------------------------------------------------------------
+# Regression: status summary must report master capital, not per-symbol zeros.
+# (REL-379) ``get_all_portfolios`` excludes the master row and per-symbol
+# rows are seeded with ``initial_balance=0.0``. Summing only those rows would
+# report total capital as $0 in the dashboard.
+# ---------------------------------------------------------------------------
+
+
+def test_status_summary_reports_master_capital(tmp_db_path):
+    """total_initial / total_balance must come from the master portfolio."""
+    from paper_trading import PaperTradingEngine
+
+    c = ScannerController(db_path=tmp_db_path)
+    summary = c.status()["summary"]
+
+    assert summary["total_initial"] == pytest.approx(
+        PaperTradingEngine.MASTER_INITIAL_BALANCE
+    )
+    assert summary["total_balance"] == pytest.approx(
+        PaperTradingEngine.MASTER_INITIAL_BALANCE
+    )
+    # Per-symbol analytics rows still reported as portfolios for breakdown.
+    assert summary["portfolios"] >= 1
+    assert summary["total_trades"] == 0
+    assert summary["total_pnl"] == 0.0
+
+
+def test_status_summary_does_not_double_count_trades(tmp_db_path):
+    """After one closed trade, totals must equal the master row — not 2×.
+
+    ``execute_trade`` and ``close_trade`` bump both the master row and the
+    per-symbol analytics row in lockstep. The status summary previously
+    summed the per-symbol rows; combining that with the master row would
+    double-count. We assert the summary equals the master row exactly.
+    """
+    from paper_trading import PaperTradingEngine
+    from strategies import Signal
+    from market_config import StrategyType
+    from position_sizing import PositionSizeResult
+
+    engine = PaperTradingEngine(db_path=tmp_db_path)
+    sig = Signal(
+        direction="LONG", strength=0.7, strategy=StrategyType.MOMENTUM,
+        symbol="BTC-USD", timeframe="1h", entry_price=100.0,
+        stop_loss=96.0, take_profit=108.0, risk_reward_ratio=2.0,
+        reasoning="regression", metadata={"atr_pct": 0.04},
+    )
+    pos = PositionSizeResult(
+        position_size_usd=500.0, quantity=5.0, risk_per_trade_usd=10.0,
+        risk_pct=0.02, kelly_fraction=0.2, half_kelly=0.1,
+        stop_loss=96.0, take_profit=108.0, reason="regression",
+    )
+    tid = engine.execute_trade(sig, pos)
+    assert tid is not None
+    engine.close_trade(tid, exit_price=108.0)  # +$40 win
+
+    c = ScannerController(db_path=tmp_db_path)
+    summary = c.status()["summary"]
+    master = engine.get_master_portfolio()
+
+    assert summary["total_trades"] == master["total_trades"] == 1
+    assert summary["winning_trades"] == master["winning_trades"] == 1
+    assert summary["total_pnl"] == pytest.approx(master["total_pnl"])
+    assert summary["total_balance"] == pytest.approx(master["current_balance"])

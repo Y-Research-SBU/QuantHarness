@@ -125,7 +125,40 @@ class ProfileLoader:
             logger.warning("invalid state.json at %s: %s", path, exc)
             return None
 
-    def is_alive(self, pid: Optional[int]) -> bool:
+    # Heartbeat is considered fresh for this many seconds. Tournament
+    # instances write state.json every cycle (~10–30 s), so 5 min is a
+    # generous slack that survives a slow scan or a one-off blip without
+    # falsely flagging an instance as stopped.
+    HEARTBEAT_FRESHNESS_SECONDS = 300
+
+    def is_alive(self, pid: Optional[int], last_heartbeat: Optional[str] = None) -> bool:
+        """Decide whether an instance is currently running.
+
+        Two-pronged check so this works both locally (where the pid lives in
+        our own process table) and on the deployed dashboard (where pids
+        belong to a different host and ``os.kill`` always fails):
+
+        1. If the heartbeat in ``state.json`` is fresher than
+           :attr:`HEARTBEAT_FRESHNESS_SECONDS`, the instance is alive
+           regardless of pid.
+        2. Otherwise, fall back to the local ``os.kill(pid, 0)`` check
+           — useful when running the dashboard on the same host as the
+           instances and the heartbeat is briefly stale.
+        """
+        from datetime import datetime, timezone
+
+        if last_heartbeat:
+            try:
+                ts = datetime.fromisoformat(last_heartbeat)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                age = (datetime.now(timezone.utc) - ts).total_seconds()
+                if age <= self.HEARTBEAT_FRESHNESS_SECONDS:
+                    return True
+            except (ValueError, TypeError):
+                # Malformed heartbeat — fall through to pid check.
+                pass
+
         if not pid:
             return False
         try:
@@ -144,7 +177,7 @@ class ProfileLoader:
         profile = self.load(name)
         state = self.read_state(name) or {}
         pid = state.get("pid")
-        running = self.is_alive(pid)
+        running = self.is_alive(pid, state.get("last_heartbeat"))
         return {
             "name": profile.name,
             "status": "running" if running else "stopped",

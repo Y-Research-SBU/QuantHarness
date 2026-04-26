@@ -154,6 +154,64 @@ def test_is_alive_for_invalid_pid_is_false(tmp_loader):
     assert loader.is_alive(99999999) is False
 
 
+def test_is_alive_with_fresh_heartbeat_is_true_even_for_remote_pid(tmp_loader):
+    """Fresh heartbeat → alive, regardless of pid presence on this host.
+
+    This is the deployed-dashboard case: pid 99999999 belongs to a process
+    on a different host (Sami's Mac), so os.kill fails. But the state.json
+    heartbeat is fresh → the instance is alive.
+    """
+    from datetime import datetime, timezone
+    instances_dir, _ = tmp_loader
+    loader = ProfileLoader(instances_dir=instances_dir)
+    fresh = datetime.now(timezone.utc).isoformat()
+    assert loader.is_alive(99999999, last_heartbeat=fresh) is True
+    # Even with no pid, fresh heartbeat suffices.
+    assert loader.is_alive(None, last_heartbeat=fresh) is True
+
+
+def test_is_alive_with_stale_heartbeat_falls_back_to_pid(tmp_loader):
+    """Stale heartbeat (>5 min) → ignore it, use pid liveness."""
+    from datetime import datetime, timezone, timedelta
+    instances_dir, _ = tmp_loader
+    loader = ProfileLoader(instances_dir=instances_dir)
+    stale = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    # Stale heartbeat + dead pid → not alive.
+    assert loader.is_alive(99999999, last_heartbeat=stale) is False
+    # Stale heartbeat + this process's pid → alive (pid fallback).
+    assert loader.is_alive(os.getpid(), last_heartbeat=stale) is True
+
+
+def test_is_alive_handles_malformed_heartbeat(tmp_loader):
+    """Garbage heartbeat string must not raise; falls back to pid check."""
+    instances_dir, _ = tmp_loader
+    loader = ProfileLoader(instances_dir=instances_dir)
+    assert loader.is_alive(os.getpid(), last_heartbeat="not-a-date") is True
+    assert loader.is_alive(99999999, last_heartbeat="not-a-date") is False
+    assert loader.is_alive(None, last_heartbeat="") is False
+
+
+def test_describe_returns_running_when_heartbeat_is_fresh_remote_pid(tmp_loader):
+    """End-to-end: describe() honors fresh heartbeats for remote pids.
+
+    This is the exact scenario the deployed Railway dashboard hits.
+    """
+    from datetime import datetime, timezone
+    instances_dir, make = tmp_loader
+    d = make("romeo")
+    fresh = datetime.now(timezone.utc).isoformat()
+    (d / "state.json").write_text(json.dumps({
+        "pid": 99999999,  # remote pid — not on this host
+        "last_heartbeat": fresh,
+        "equity": 12345.6,
+    }))
+    loader = ProfileLoader(instances_dir=instances_dir)
+    out = loader.describe("romeo")
+    assert out["status"] == "running"
+    assert out["pid"] == 99999999
+    assert out["equity"] == 12345.6
+
+
 def test_describe_returns_status_running_when_pid_alive(tmp_loader):
     instances_dir, make = tmp_loader
     d = make("juliet")

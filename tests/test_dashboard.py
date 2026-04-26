@@ -629,3 +629,112 @@ def test_price_feed_not_started_in_tests(app):
     """TESTING=True and DASHBOARD_DISABLE_PRICE_FEED=1 must both keep the
     background WS/polling threads out of the way."""
     assert "price_feed" not in app.extensions
+
+
+# ───────────────────── Regression: NULL pnl on OPEN trades ─────────────────────
+# Production crashed (HTTP 500) on /api/overview, /api/positions, /api/markets,
+# /api/instances, /api/tournament, /api/market_categories whenever an OPEN
+# trade row had a NULL pnl (older rows written before the schema's DEFAULT 0.0
+# was added, or fresh rows written before mark_to_market's first pass).
+#
+# Root cause: ``float(t.get("pnl", 0))`` -> dict.get() only substitutes the
+# default when the KEY is absent; here the key is present with value None, so
+# the call resolves to ``float(None)`` -> TypeError.
+#
+# Fix: dashboard._safe_float coerces None / unparseable values to a default
+# without raising. These tests pin both the helper contract and the
+# end-to-end route stability.
+
+
+def test_safe_float_handles_none():
+    assert dashboard._safe_float(None) == 0.0
+    assert dashboard._safe_float(None, default=42.0) == 42.0
+
+
+def test_safe_float_handles_unparseable():
+    assert dashboard._safe_float("not-a-number") == 0.0
+    assert dashboard._safe_float({}, default=-1.0) == -1.0
+
+
+def test_safe_float_passes_through_numeric():
+    assert dashboard._safe_float(0) == 0.0
+    assert dashboard._safe_float(3.14) == 3.14
+    assert dashboard._safe_float("2.5") == 2.5
+    assert dashboard._safe_float(-1) == -1.0
+
+
+def _seed_open_trade_with_null_pnl(db_path: str) -> None:
+    """Insert an OPEN trade with explicit NULL pnl/pnl_pct/stop_loss/take_profit
+    to reproduce the production crasher. SQLite stores NULL even when the
+    schema declares DEFAULT 0.0 if the INSERT explicitly passes None."""
+    import sqlite3 as _sqlite3
+    conn = _sqlite3.connect(db_path)
+    conn.execute(
+        """INSERT INTO trades
+           (symbol, timeframe, strategy, direction, entry_price, position_size,
+            quantity, stop_loss, take_profit, pnl, pnl_pct, status, entry_time)
+           VALUES ('BTC-USD', '1d', 'momentum', 'LONG', 50000.0, 500.0,
+                   0.01, NULL, NULL, NULL, NULL, 'OPEN',
+                   datetime('now', '-2 hours'))""",
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_api_overview_with_null_pnl_open_trade_does_not_500(tmp_db_path, tmp_path):
+    """Regression: /api/overview must not 500 when an OPEN trade has NULL pnl."""
+    init_db(tmp_db_path)
+    _seed_open_trade_with_null_pnl(tmp_db_path)
+
+    app = dashboard.create_app(db_path=tmp_db_path, backtest_dir=str(tmp_path))
+    app.config["TESTING"] = True
+    client = app.test_client()
+    r = client.get("/api/overview")
+    assert r.status_code == 200, r.data
+    assert r.is_json
+
+
+def test_api_positions_with_null_pnl_open_trade_does_not_500(tmp_db_path, tmp_path):
+    """Regression: /api/positions must not 500 when an OPEN trade has NULL pnl."""
+    init_db(tmp_db_path)
+    _seed_open_trade_with_null_pnl(tmp_db_path)
+
+    app = dashboard.create_app(db_path=tmp_db_path, backtest_dir=str(tmp_path))
+    app.config["TESTING"] = True
+    client = app.test_client()
+    r = client.get("/api/positions")
+    assert r.status_code == 200, r.data
+    body = r.get_json()
+    assert isinstance(body, list)
+    assert len(body) == 1
+    pos = body[0]
+    assert pos["symbol"] == "BTC-USD"
+    # NULL pnl coerces to 0 unrealized; route must still produce a row.
+    assert pos.get("unrealized_pnl") in (0, 0.0) or pos.get("unrealized_pnl") is not None
+
+
+def test_api_market_categories_with_null_pnl_open_trade_does_not_500(tmp_db_path, tmp_path):
+    """Regression: /api/market_categories must not 500 when OPEN trade has NULL pnl."""
+    init_db(tmp_db_path)
+    _seed_open_trade_with_null_pnl(tmp_db_path)
+
+    app = dashboard.create_app(db_path=tmp_db_path, backtest_dir=str(tmp_path))
+    app.config["TESTING"] = True
+    client = app.test_client()
+    r = client.get("/api/market_categories")
+    assert r.status_code == 200, r.data
+    body = r.get_json()
+    assert "sections" in body or isinstance(body, dict)
+
+
+def test_compute_unrealized_pnl_with_null_pnl_does_not_raise(tmp_db_path):
+    """Helper-level guarantee: _compute_unrealized_pnl must handle NULL pnl."""
+    init_db(tmp_db_path)
+    _seed_open_trade_with_null_pnl(tmp_db_path)
+    # Must not raise and must include the symbol in the result map.
+    result = dashboard._compute_unrealized_pnl(tmp_db_path)
+    assert isinstance(result, dict)
+    assert "BTC-USD" in result
+    # NULL pnl with no MTM => fallback path tries to fetch live price; if that
+    # network call returns nothing, the value should still be a finite float.
+    assert isinstance(result["BTC-USD"], (int, float))

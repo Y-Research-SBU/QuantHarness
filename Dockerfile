@@ -18,6 +18,12 @@ COPY dashboard.py .
 COPY price_feed.py .
 COPY market_config.py .
 COPY db_schema.py .
+# Tournament view dependencies — without these the /api/tournament and
+# /api/instances routes 500 with ModuleNotFoundError: No module named
+# 'profile_loader'.
+COPY profile_loader.py .
+COPY tournament_judge.py .
+COPY instances/ instances/
 COPY templates/ templates/
 COPY static/ static/
 

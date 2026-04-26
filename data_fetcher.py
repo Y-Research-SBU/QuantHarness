@@ -163,7 +163,23 @@ def fetch_market_data(
         cols = required + (["Volume"] if "Volume" in df.columns else [])
         df = df[cols].copy()
         df["Datetime"] = pd.to_datetime(df["Datetime"])
-        
+
+        # Drop incomplete / NaN bars. yfinance occasionally returns a partial
+        # "today" daily bar with NaN OHLCV (especially for crypto on weekends),
+        # which silently corrupts every downstream consumer:
+        #   - mark_to_market skips the symbol -> open positions show pnl=NULL
+        #   - check_stops compares price <= stop with NaN, which is always
+        #     False, so SL/TP never fire and positions get stuck OPEN.
+        # Always drop rows where the Close is missing/non-finite so callers
+        # only ever see complete bars.
+        before = len(df)
+        df = df[df["Close"].notna()].reset_index(drop=True)
+        if len(df) < before:
+            logger.debug(
+                "%s/%s: dropped %d incomplete bar(s) with NaN Close",
+                symbol, interval, before - len(df),
+            )
+
         # Limit to requested bars
         if bars and len(df) > bars:
             df = df.tail(bars).reset_index(drop=True)

@@ -308,6 +308,113 @@ def test_single_symbol_scan_does_not_orphan_other_markets(tmp_db_path, patched_f
     )
 
 
+def test_run_scan_cycle_fetches_prices_for_all_open_positions(tmp_db_path, patched_fetcher):
+    """Capacity-deadlock regression (2026-04-25).
+
+    The continuous runner calls ``run_scan_cycle(symbols=[one_symbol])`` once
+    per cycle. Previously the price-fetch loop only iterated over
+    ``symbols``, so ``check_stops`` skipped every other open position
+    (because ``symbol not in current_prices``), and stops/take-profits/
+    time-exits never fired for them. With MAX_POSITIONS=20 the bot then
+    deadlocked on stagnant positions whose symbol wasn't being scanned
+    that cycle (e.g. AAPL on a Saturday).
+
+    The fix: build the price-fetch list as the union of the scan-target
+    symbols *and* every symbol with an open position.
+    """
+    from strategies import Signal
+    from market_config import StrategyType
+
+    scanner = MarketScanner(db_path=tmp_db_path, use_self_improvement=False, use_kronos=False)
+    scanner.engine.COOLDOWN_MINUTES = 0
+
+    # Open a trade on ETH-USD.
+    signal = Signal(
+        direction="LONG", strength=0.8, strategy=StrategyType.KRONOS_MOMENTUM_CONFIRM,
+        symbol="ETH-USD", timeframe="4h",
+        entry_price=3000.0, stop_loss=2800.0, take_profit=3400.0,
+        risk_reward_ratio=2.0, reasoning="test",
+    )
+    ids = scanner.execute_signals([signal])
+    assert len(ids) == 1
+
+    # Spy on the engine's check_stops so we can inspect the price map it
+    # actually receives during the scan cycle.
+    real_check = scanner.engine.check_stops
+    seen_prices: dict = {}
+
+    def spy(prices):
+        seen_prices.update(prices)
+        return real_check(prices)
+
+    scanner.engine.check_stops = spy  # type: ignore[assignment]
+
+    # Scan only BTC-USD (a *different* symbol than the open ETH-USD trade).
+    scanner.run_scan_cycle(symbols=["BTC-USD"])
+
+    # Both the scan target AND the open-position symbol must be priced so
+    # ``check_stops`` can evaluate stop-loss / time-exit on every open trade
+    # every cycle — otherwise stagnant positions deadlock the bot.
+    assert "BTC-USD" in seen_prices, (
+        f"scan target BTC-USD missing from check_stops price map: {seen_prices}"
+    )
+    assert "ETH-USD" in seen_prices, (
+        f"open-position symbol ETH-USD missing from check_stops price map; "
+        f"capacity-deadlock fix regressed. seen={seen_prices}"
+    )
+
+
+def test_run_scan_cycle_time_exits_stale_position_on_unrelated_scan(
+    tmp_db_path, patched_fetcher
+):
+    """End-to-end check that a stale position on symbol A actually time-exits
+    when the scanner is only scanning symbol B. Prior to the fix the time
+    exit never fired because A's price was never fetched."""
+    from datetime import datetime, timedelta
+    from strategies import Signal
+    from market_config import StrategyType
+    from db_schema import get_connection
+
+    scanner = MarketScanner(db_path=tmp_db_path, use_self_improvement=False, use_kronos=False)
+    scanner.engine.COOLDOWN_MINUTES = 0
+    scanner.engine.MAX_HOLD_HOURS = 1  # tight time-exit so the test is fast
+
+    # Open ETH-USD position.
+    signal = Signal(
+        direction="LONG", strength=0.8, strategy=StrategyType.KRONOS_MOMENTUM_CONFIRM,
+        symbol="ETH-USD", timeframe="4h",
+        entry_price=3000.0, stop_loss=2800.0, take_profit=3400.0,
+        risk_reward_ratio=2.0, reasoning="test",
+    )
+    ids = scanner.execute_signals([signal])
+    assert len(ids) == 1
+    trade_id = ids[0]
+
+    # Backdate the entry_time so it is older than MAX_HOLD_HOURS.
+    backdated = (datetime.utcnow() - timedelta(hours=2)).isoformat()
+    with get_connection(tmp_db_path) as conn:
+        conn.execute(
+            "UPDATE trades SET entry_time = ? WHERE id = ?",
+            (backdated, trade_id),
+        )
+
+    # Sanity: still OPEN before the scan.
+    assert scanner.engine.get_open_positions("ETH-USD")
+
+    # Scan an unrelated symbol — the stale ETH-USD trade should still close
+    # via time-exit because the scanner now fetches prices for every open
+    # position symbol.
+    scanner.run_scan_cycle(symbols=["BTC-USD"])
+
+    eth_open = [
+        p for p in scanner.engine.get_open_positions() if p["symbol"] == "ETH-USD"
+    ]
+    assert eth_open == [], (
+        "ETH-USD position should have been time-exited even though the scan "
+        "target was BTC-USD; capacity-deadlock fix regressed."
+    )
+
+
 # ─────────────────────── Min-strength filter ───────────────────────
 
 

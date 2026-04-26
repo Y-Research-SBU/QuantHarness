@@ -281,6 +281,92 @@ def test_check_stops_handles_missing_price(tmp_db_path):
     assert closed == []
 
 
+# ─────────────────────── Time-based exit ───────────────────────
+
+
+def _backdate_trade(db_path: str, trade_id: int, hours_ago: float) -> None:
+    """Rewrite a trade's entry_time to ``hours_ago`` hours in the past."""
+    from datetime import datetime, timedelta
+    from db_schema import get_connection
+
+    backdated = (datetime.utcnow() - timedelta(hours=hours_ago)).isoformat()
+    with get_connection(db_path) as conn:
+        conn.execute(
+            "UPDATE trades SET entry_time = ? WHERE id = ?",
+            (backdated, trade_id),
+        )
+
+
+def test_check_stops_time_exit_closes_old_position(tmp_db_path):
+    engine = _fresh_engine(tmp_db_path)
+    engine.MAX_HOLD_HOURS = 24
+    trade_id = engine.execute_trade(
+        _mk_signal(entry=100, stop=95, tp=110),
+        _mk_pos(size=500, qty=5, stop=95, tp=110),
+    )
+    _backdate_trade(tmp_db_path, trade_id, hours_ago=25.0)
+
+    # Price between stop and target — only the time-exit should fire.
+    closed = engine.check_stops({"BTC-USD": 102.0})
+    assert len(closed) == 1
+    assert closed[0]["status"] == "CLOSED"  # time_exit -> CLOSED, not STOPPED
+    assert closed[0]["exit_price"] == 102.0
+
+
+def test_check_stops_time_exit_skips_young_position(tmp_db_path):
+    engine = _fresh_engine(tmp_db_path)
+    engine.MAX_HOLD_HOURS = 24
+    engine.execute_trade(
+        _mk_signal(entry=100, stop=95, tp=110),
+        _mk_pos(size=500, qty=5, stop=95, tp=110),
+    )
+    # Trade is fresh — should NOT time-exit.
+    closed = engine.check_stops({"BTC-USD": 102.0})
+    assert closed == []
+
+
+def test_check_stops_disabled_when_max_hold_hours_zero(tmp_db_path):
+    engine = _fresh_engine(tmp_db_path)
+    engine.MAX_HOLD_HOURS = 0  # disabled
+    trade_id = engine.execute_trade(
+        _mk_signal(entry=100, stop=95, tp=110),
+        _mk_pos(size=500, qty=5, stop=95, tp=110),
+    )
+    _backdate_trade(tmp_db_path, trade_id, hours_ago=10_000.0)
+
+    closed = engine.check_stops({"BTC-USD": 102.0})
+    assert closed == []
+
+
+def test_check_stops_stop_loss_takes_precedence_over_time_exit(tmp_db_path):
+    engine = _fresh_engine(tmp_db_path)
+    engine.MAX_HOLD_HOURS = 24
+    trade_id = engine.execute_trade(
+        _mk_signal(entry=100, stop=95, tp=110),
+        _mk_pos(size=500, qty=5, stop=95, tp=110),
+    )
+    _backdate_trade(tmp_db_path, trade_id, hours_ago=25.0)
+
+    # Price below stop — stop_loss must win, not time_exit.
+    closed = engine.check_stops({"BTC-USD": 94.0})
+    assert len(closed) == 1
+    assert closed[0]["status"] == "STOPPED"  # stop_loss took precedence
+
+
+def test_check_stops_time_exit_short_position(tmp_db_path):
+    engine = _fresh_engine(tmp_db_path)
+    engine.MAX_HOLD_HOURS = 24
+    sig = _mk_signal(direction="SHORT", entry=100, stop=105, tp=90)
+    trade_id = engine.execute_trade(sig, _mk_pos(size=500, qty=5, stop=105, tp=90))
+    _backdate_trade(tmp_db_path, trade_id, hours_ago=30.0)
+
+    # Price between stop and target for a SHORT — only time_exit fires.
+    closed = engine.check_stops({"BTC-USD": 98.0})
+    assert len(closed) == 1
+    assert closed[0]["status"] == "CLOSED"
+    assert closed[0]["exit_price"] == 98.0
+
+
 # ─────────────────────── Snapshots ───────────────────────
 
 
@@ -430,6 +516,48 @@ def test_mark_to_market_skips_nonpositive_prices(tmp_db_path):
     summary = engine.mark_to_market({"BTC-USD": 0.0})
     assert summary["positions_marked"] == 0
     assert summary["positions_skipped"] == 1
+
+
+def test_mark_to_market_skips_nan_prices(tmp_db_path):
+    """NaN quotes must be rejected so pnl/pnl_pct stay valid (not NULL).
+
+    Regression: yfinance occasionally returns NaN closes for thinly-traded
+    crypto symbols. ``nan <= 0`` evaluates to False, which would slip past a
+    naive guard and corrupt ``pnl``/``pnl_pct`` to NULL in SQLite, leaving
+    positions stuck OPEN with no usable P&L forever.
+    """
+    import math as _math
+
+    engine = PaperTradingEngine(db_path=tmp_db_path)
+    engine.execute_trade(_mk_signal(), _mk_pos())
+    summary = engine.mark_to_market({"BTC-USD": float("nan")})
+    assert summary["positions_marked"] == 0
+    assert summary["positions_skipped"] == 1
+
+    # Same protection for +/- inf.
+    summary_inf = engine.mark_to_market({"BTC-USD": _math.inf})
+    assert summary_inf["positions_marked"] == 0
+    assert summary_inf["positions_skipped"] == 1
+
+    summary_ninf = engine.mark_to_market({"BTC-USD": -_math.inf})
+    assert summary_ninf["positions_marked"] == 0
+    assert summary_ninf["positions_skipped"] == 1
+
+
+def test_check_stops_ignores_nan_prices(tmp_db_path):
+    """NaN prices must NOT trigger stops/TP. ``nan <= sl`` / ``nan >= tp``
+    are both False, so a naive impl would silently skip the trade. We want
+    explicit rejection so a bad tick can't accidentally close a position.
+    """
+    engine = PaperTradingEngine(db_path=tmp_db_path)
+    engine.MIN_HOLD_MINUTES = 0  # allow immediate stop checks for the test
+    engine.execute_trade(_mk_signal(), _mk_pos())
+    closed = engine.check_stops({"BTC-USD": float("nan")})
+    assert closed == []
+    # Position must remain OPEN.
+    open_now = engine.get_open_positions()
+    assert len(open_now) == 1
+    assert open_now[0]["status"] == "OPEN"
 
 
 def test_mark_to_market_empty_when_no_open_positions(tmp_db_path):

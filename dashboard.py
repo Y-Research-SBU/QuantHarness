@@ -488,6 +488,25 @@ def _get_cached_prices(symbols: List[str]) -> Dict[str, float]:
     return prices
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Coerce a possibly-None / possibly-string value to float.
+
+    SQLite returns ``None`` for NULL columns even when a schema declares a
+    DEFAULT — older rows written before the DEFAULT was added still come back
+    as None. ``dict.get(key, default)`` does NOT substitute the default when
+    the key is present with a None value, which is why ``float(t.get("pnl", 0))``
+    crashes with ``TypeError: float() argument must be a string or a real
+    number, not 'NoneType'`` on those rows. This helper handles both cases
+    and any other un-coercible value safely.
+    """
+    if value is None:
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def _compute_unrealized_pnl(db_path: str) -> Dict[str, float]:
     """Compute unrealized P&L per symbol from open trades.
 
@@ -509,14 +528,15 @@ def _compute_unrealized_pnl(db_path: str) -> Dict[str, float]:
     for t in open_trades:
         by_symbol.setdefault(t["symbol"], []).append(t)
 
-    # Check whether mark_to_market has run (any open trade with nonzero pnl)
-    has_mtm = any(float(t.get("pnl", 0)) != 0.0 for t in open_trades)
+    # Check whether mark_to_market has run (any open trade with nonzero pnl).
+    # Use _safe_float so legacy rows with NULL pnl don't crash the route.
+    has_mtm = any(_safe_float(t.get("pnl")) != 0.0 for t in open_trades)
 
     if has_mtm:
         # Trust the DB: mark_to_market already computed these.
         unrealized: Dict[str, float] = {}
         for symbol, trades in by_symbol.items():
-            unrealized[symbol] = sum(float(t.get("pnl", 0)) for t in trades)
+            unrealized[symbol] = sum(_safe_float(t.get("pnl")) for t in trades)
         return unrealized
 
     # Fallback: MTM hasn't run yet, compute from live prices.
@@ -534,12 +554,12 @@ def _compute_unrealized_pnl(db_path: str) -> Dict[str, float]:
                     "ORDER BY exit_time DESC LIMIT 1",
                     (symbol,),
                 ).fetchone()
-                price = float(row[0]) if row and row[0] else float(trades[0].get("entry_price", 0))
+                price = float(row[0]) if row and row[0] else _safe_float(trades[0].get("entry_price"))
 
             sym_pnl = 0.0
             for t in trades:
-                entry = float(t.get("entry_price", 0))
-                qty = float(t.get("quantity", 0))
+                entry = _safe_float(t.get("entry_price"))
+                qty = _safe_float(t.get("quantity"))
                 if t.get("direction") == "LONG":
                     sym_pnl += (price - entry) * qty
                 else:
@@ -689,7 +709,7 @@ def build_overview(db_path: str) -> Dict[str, Any]:
     open_positions = _query_trades(db_path, limit=1000, status="OPEN")
 
     # Master cash + all open position values = equity
-    total_open_value = sum(float(t.get("position_size", 0)) for t in open_positions)
+    total_open_value = sum(_safe_float(t.get("position_size")) for t in open_positions)
     if master:
         total_cash = float(master["current_balance"])
         total_initial = float(master["initial_balance"])
@@ -844,7 +864,7 @@ def build_market_grid(db_path: str) -> List[Dict[str, Any]]:
     open_count_by_sym: Dict[str, int] = {}
     for t in open_trades:
         s = t["symbol"]
-        open_value_by_sym[s] = open_value_by_sym.get(s, 0) + float(t.get("position_size", 0))
+        open_value_by_sym[s] = open_value_by_sym.get(s, 0) + _safe_float(t.get("position_size"))
         open_count_by_sym[s] = open_count_by_sym.get(s, 0) + 1
 
     # Global circuit-breaker flag lives on the master portfolio.
@@ -922,27 +942,28 @@ def build_positions_detail(db_path: str) -> List[Dict[str, Any]]:
     markets_meta = _load_markets_meta()
 
     # Check whether mark_to_market has populated pnl on open trades.
-    has_mtm = any(float(t.get("pnl", 0)) != 0.0 for t in open_trades)
+    # Use _safe_float so legacy rows with NULL pnl don't crash the route.
+    has_mtm = any(_safe_float(t.get("pnl")) != 0.0 for t in open_trades)
 
     positions = []
     for t in open_trades:
         symbol = t["symbol"]
-        entry = float(t.get("entry_price", 0))
-        sl = float(t.get("stop_loss", 0)) if t.get("stop_loss") else None
-        tp = float(t.get("take_profit", 0)) if t.get("take_profit") else None
-        qty = float(t.get("quantity", 0))
+        entry = _safe_float(t.get("entry_price"))
+        sl = _safe_float(t.get("stop_loss")) if t.get("stop_loss") is not None else None
+        tp = _safe_float(t.get("take_profit")) if t.get("take_profit") is not None else None
+        qty = _safe_float(t.get("quantity"))
         direction = t.get("direction", "")
-        size = float(t.get("position_size", 0))
+        size = _safe_float(t.get("position_size"))
         meta = markets_meta.get(symbol, {})
 
         # Unrealized P&L: when mark_to_market has run, always trust the DB
         # values — they were computed from the scanner's own price feed which
         # fetches per-symbol and is more reliable than the dashboard's batch
         # yfinance call (which can return stale daily closes).
-        db_pnl = float(t.get("pnl", 0))
-        if has_mtm and (db_pnl != 0.0 or float(t.get("pnl_pct", 0)) != 0.0):
+        db_pnl = _safe_float(t.get("pnl"))
+        if has_mtm and (db_pnl != 0.0 or _safe_float(t.get("pnl_pct")) != 0.0):
             unrealized = db_pnl
-            unrealized_pct_val = float(t.get("pnl_pct", 0)) * 100
+            unrealized_pct_val = _safe_float(t.get("pnl_pct")) * 100
             # Derive current price from DB pnl for display.
             if entry > 0 and qty > 0:
                 if direction == "LONG":

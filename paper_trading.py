@@ -9,6 +9,7 @@ do not hold any cash of their own.
 
 import json
 import logging
+import math
 import sqlite3
 from datetime import datetime, date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -66,6 +67,19 @@ class PaperTradingEngine:
     # bot from repeatedly shorting into a rally (INJ-USD problem).
     SYMBOL_CB_MAX_CONSECUTIVE_LOSSES = 3
     SYMBOL_CB_COOLDOWN_MINUTES = 480  # 8 hours (was 2h, increased after INJ-USD kept re-entering)
+
+    # Time-based exit: positions held longer than ``MAX_HOLD_HOURS`` are force-
+    # closed at the current price with reason="time_exit". Required to prevent
+    # capacity-deadlock where stagnant positions consume all MAX_POSITIONS
+    # slots and the scanner can't open new (better) trades. The backtester
+    # already has max_holding_bars; this brings live trading in line.
+    # Set to 0 to disable.
+    # 2026-04-25: lowered from 48h -> 24h after observing 32h-old positions
+    # with <0.01% movement consuming all MAX_POSITIONS slots. Combined with
+    # the scanner.py fix that now fetches prices for all open symbols every
+    # cycle (not just the per-cycle scan target), stagnant positions will
+    # exit a full day sooner and free capacity for fresh signals.
+    MAX_HOLD_HOURS = 24
 
     # ── Minimum stop distance floor ──────────────────────────────
     # Reject trades where the stop-loss is too tight (noise-level).
@@ -593,10 +607,20 @@ class PaperTradingEngine:
             for trade in open_trades:
                 symbol = trade["symbol"]
                 price = current_prices.get(symbol)
-                if price is None or float(price) <= 0:
+                if price is None:
                     skipped += 1
                     continue
-                price = float(price)
+                try:
+                    price = float(price)
+                except (TypeError, ValueError):
+                    skipped += 1
+                    continue
+                # NaN/inf comparisons are always False, so a non-finite
+                # price would silently slip past ``price <= 0`` and corrupt
+                # ``pnl``/``pnl_pct`` (NaN -> NULL in SQLite). Reject here.
+                if not math.isfinite(price) or price <= 0:
+                    skipped += 1
+                    continue
 
                 qty = float(trade["quantity"] or 0.0)
                 if trade["direction"] == "LONG":
@@ -623,14 +647,24 @@ class PaperTradingEngine:
         }
 
     def check_stops(self, current_prices: Dict[str, float]) -> List[Dict]:
-        """Check all open positions for stop-loss/take-profit hits.
+        """Check all open positions for stop-loss/take-profit/time-exit hits.
 
         Trades opened within ``MIN_HOLD_MINUTES`` are skipped so a stale quote
         at entry time doesn't instantly trigger a flat $0 exit.
+
+        Trades older than ``MAX_HOLD_HOURS`` are force-closed at the current
+        price with reason="time_exit" — frees up MAX_POSITIONS slots so the
+        scanner can open new trades instead of deadlocking on stagnant ones.
         """
         closed = []
         open_trades = self.get_open_positions()
-        min_hold_cutoff = datetime.utcnow() - timedelta(minutes=self.MIN_HOLD_MINUTES)
+        now = datetime.utcnow()
+        min_hold_cutoff = now - timedelta(minutes=self.MIN_HOLD_MINUTES)
+        max_hold_cutoff = (
+            now - timedelta(hours=self.MAX_HOLD_HOURS)
+            if self.MAX_HOLD_HOURS and self.MAX_HOLD_HOURS > 0
+            else None
+        )
 
         for trade in open_trades:
             symbol = trade["symbol"]
@@ -640,15 +674,26 @@ class PaperTradingEngine:
             # Skip trades younger than MIN_HOLD_MINUTES — prevents instant exits
             # driven by entry-price == current-price stale data.
             entry_time_raw = trade.get("entry_time")
-            if entry_time_raw and self.MIN_HOLD_MINUTES > 0:
+            entry_dt: Optional[datetime] = None
+            if entry_time_raw:
                 try:
                     entry_dt = datetime.fromisoformat(str(entry_time_raw))
-                    if entry_dt > min_hold_cutoff:
-                        continue
                 except (TypeError, ValueError):
-                    pass  # unparseable timestamp → fall through and evaluate
+                    entry_dt = None
+            if entry_dt is not None and self.MIN_HOLD_MINUTES > 0:
+                if entry_dt > min_hold_cutoff:
+                    continue
 
-            price = current_prices[symbol]
+            raw_price = current_prices[symbol]
+            # Reject NaN/inf/<=0 quotes so they don't slip past stop checks.
+            # ``nan <= stop_loss`` and ``nan >= take_profit`` are both False,
+            # which would make stops effectively ignored on bad ticks.
+            try:
+                price = float(raw_price)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(price) or price <= 0:
+                continue
 
             if trade["direction"] == "LONG":
                 if trade["stop_loss"] and price <= trade["stop_loss"]:
@@ -672,6 +717,14 @@ class PaperTradingEngine:
                     if result:
                         closed.append(result)
                     continue
+
+            # Time-based exit (only if neither stop nor target hit).
+            # Force-close stagnant positions so they don't hog MAX_POSITIONS.
+            if max_hold_cutoff is not None and entry_dt is not None and entry_dt <= max_hold_cutoff:
+                result = self.close_trade(trade["id"], price, reason="time_exit")
+                if result:
+                    closed.append(result)
+                continue
 
         return closed
 

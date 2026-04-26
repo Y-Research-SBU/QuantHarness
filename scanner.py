@@ -10,6 +10,8 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+import math
+
 import pandas as pd
 
 from data_fetcher import fetch_market_data, prepare_kline_dict
@@ -646,13 +648,54 @@ class MarketScanner:
         # Reset daily P&L if needed
         self.engine.reset_daily_pnl()
 
-        # Get current prices and check stops
+        # Get current prices and check stops.
+        # Guard against NaN/inf/<=0 closes from upstream feeds (yfinance can
+        # silently return NaN for thinly-traded crypto). NaN comparisons are
+        # always False, which means a NaN price would slip past the
+        # ``price <= stop_loss`` check in ``check_stops`` and the ``price <= 0``
+        # filter in ``mark_to_market``, leaving positions stuck OPEN forever
+        # with NULL pnl. Reject those quotes here so downstream code only ever
+        # sees finite, positive prices.
+        #
+        # CAPACITY-DEADLOCK FIX (2026-04-25): The continuous runner calls
+        # ``run_scan_cycle(symbols=[one_symbol])`` once per cycle. If we only
+        # fetch prices for ``symbols``, then ``check_stops`` skips every
+        # *other* open position (because ``symbol not in current_prices``),
+        # and stops/take-profits/time-exits never fire for them. With
+        # MAX_POSITIONS=20, the bot deadlocks on stagnant positions whose
+        # symbol is not the one being scanned this cycle (e.g. weekend
+        # stocks). Always include the union of the scan-target symbols and
+        # all symbols with currently open positions so stops are evaluated
+        # every cycle for every open trade.
+        try:
+            open_position_symbols = {
+                p["symbol"] for p in self.engine.get_open_positions()
+            }
+        except Exception as exc:
+            logger.warning(
+                "get_open_positions() failed during price fetch (non-fatal): %s",
+                exc,
+            )
+            open_position_symbols = set()
+        price_fetch_symbols = list({*symbols, *open_position_symbols})
         current_prices = {}
-        for symbol in symbols:
+        for symbol in price_fetch_symbols:
             try:
                 df = fetch_market_data(symbol, "1d", bars=2)
-                if not df.empty:
-                    current_prices[symbol] = float(df["Close"].iloc[-1])
+                if df.empty:
+                    continue
+                raw = df["Close"].iloc[-1]
+                try:
+                    price = float(raw)
+                except (TypeError, ValueError):
+                    continue
+                if not math.isfinite(price) or price <= 0:
+                    logger.warning(
+                        "current_price for %s is non-finite or <=0 (%r) -- skipping",
+                        symbol, raw,
+                    )
+                    continue
+                current_prices[symbol] = price
             except Exception:
                 pass
 

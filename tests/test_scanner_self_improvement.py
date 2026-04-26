@@ -153,6 +153,9 @@ class _FakeImprover:
     def get_kronos_confidence_adjustment(self, symbol) -> float:
         return 1.0
 
+    def is_kronos_symbol_blocked(self, symbol) -> bool:
+        return getattr(self, "blocked_symbols", set()).__contains__(symbol)
+
     def record_kronos_outcome(self, **kwargs) -> None:
         self.record_kronos_calls.append(kwargs)
 
@@ -312,6 +315,44 @@ def test_run_kronos_forecast_logs_prediction(tmp_db_path, monkeypatch):
     with get_connection(tmp_db_path) as conn:
         n = conn.execute("SELECT COUNT(*) AS n FROM kronos_predictions").fetchone()["n"]
     assert n == 1
+
+
+def test_run_kronos_forecast_zeros_confidence_for_blocked_symbol(tmp_db_path):
+    """_run_kronos_forecast must zero confidence on symbols the improver blocks.
+
+    Acts as a hard guard for chronically miscalibrated markets so downstream
+    kronos_* strategies fall through their min_confidence gate and skip
+    entirely.
+    """
+    scanner = MarketScanner(db_path=tmp_db_path, use_kronos=True, use_agents=False)
+
+    fake_forecast = SimpleNamespace(
+        to_dict=lambda: {
+            "direction": "UP",
+            "magnitude_pct": 2.0,
+            "confidence": 0.85,
+            "predicted_close": 102.0,
+            "horizon": 12,
+        },
+    )
+    scanner._kronos_agent = SimpleNamespace(predict=lambda df, timeframe=None: fake_forecast)
+
+    fake = _FakeImprover()
+    fake.blocked_symbols = {"DOOM-USD"}
+    scanner.self_improver = fake
+
+    df = _fake_frame()
+
+    blocked = scanner._run_kronos_forecast("DOOM-USD", "1h", df)
+    assert blocked is not None
+    assert blocked["confidence"] == 0.0
+    assert blocked.get("kronos_blocked") is True
+    assert blocked.get("raw_confidence") == 0.85
+
+    ok = scanner._run_kronos_forecast("BTC-USD", "1h", df)
+    assert ok is not None
+    assert ok["confidence"] == 0.85
+    assert ok.get("kronos_blocked") is None
 
 
 def test_close_trade_does_not_evaluate_kronos_immediately(tmp_db_path):

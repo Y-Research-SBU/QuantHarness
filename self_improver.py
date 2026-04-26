@@ -864,6 +864,45 @@ class SelfImprover:
         ratio = hit_rate / avg_conf
         return max(0.5, min(1.5, ratio))
 
+    # Per-symbol Kronos blocklist thresholds.
+    # A symbol is blocked when its Kronos hit rate is unambiguously below
+    # random over a meaningful sample. These are deliberately conservative
+    # to avoid blocking symbols that might just be in a temporary slump.
+    KRONOS_BLOCK_MIN_SAMPLES = 20
+    KRONOS_BLOCK_HIT_RATE = 0.20  # ~half of expected random performance
+
+    def is_kronos_symbol_blocked(self, symbol: str) -> bool:
+        """Return True if Kronos has demonstrably failed on this market.
+
+        A symbol is blocked when:
+          - It has at least KRONOS_BLOCK_MIN_SAMPLES resolved predictions, AND
+          - Its hit rate is at or below KRONOS_BLOCK_HIT_RATE.
+
+        Callers should treat blocked symbols as if Kronos returned no
+        actionable signal (i.e. zero confidence), preventing kronos-based
+        strategies from entering trades on chronically miscalibrated markets.
+        Never raises — returns False on any DB error.
+        """
+        try:
+            with get_connection(self.db_path) as conn:
+                row = conn.execute(
+                    """
+                    SELECT AVG(correct) AS hit_rate, COUNT(*) AS n
+                    FROM kronos_predictions
+                    WHERE symbol = ? AND correct IS NOT NULL AND correct >= 0
+                    """,
+                    (symbol,),
+                ).fetchone()
+        except Exception:
+            return False
+        if not row or not row["n"]:
+            return False
+        n = int(row["n"])
+        if n < self.KRONOS_BLOCK_MIN_SAMPLES:
+            return False
+        hit_rate = float(row["hit_rate"] or 0.0)
+        return hit_rate <= self.KRONOS_BLOCK_HIT_RATE
+
     # ==================================================================
     # Orchestration
     # ==================================================================

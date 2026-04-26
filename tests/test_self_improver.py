@@ -353,6 +353,65 @@ def test_kronos_confidence_adjustment_discounts_overconfidence(tmp_db_path):
 
 
 # ---------------------------------------------------------------------------
+# LEVEL 5: per-symbol Kronos blocklist
+# ---------------------------------------------------------------------------
+
+
+def test_is_kronos_symbol_blocked_no_data(tmp_db_path):
+    si = SelfImprover(db_path=tmp_db_path)
+    # No predictions at all → not blocked.
+    assert si.is_kronos_symbol_blocked("BTC-USD") is False
+
+
+def test_is_kronos_symbol_blocked_below_min_samples(tmp_db_path):
+    si = SelfImprover(db_path=tmp_db_path)
+    # 5 predictions, all wrong, but below min sample size → not blocked yet.
+    for _ in range(5):
+        pid = si.log_kronos_prediction("FOO-USD", "1h", "UP", 0.02, 0.7, 12)
+        si.record_kronos_outcome(pid, actual_direction="DOWN", actual_magnitude=0.01)
+    assert si.is_kronos_symbol_blocked("FOO-USD") is False
+
+
+def test_is_kronos_symbol_blocked_low_hit_rate(tmp_db_path):
+    si = SelfImprover(db_path=tmp_db_path)
+    # 25 predictions, all wrong → 0% hit rate, well above min sample size.
+    for _ in range(25):
+        pid = si.log_kronos_prediction("BAD-USD", "1h", "UP", 0.02, 0.7, 12)
+        si.record_kronos_outcome(pid, actual_direction="DOWN", actual_magnitude=0.01)
+    assert si.is_kronos_symbol_blocked("BAD-USD") is True
+
+
+def test_is_kronos_symbol_blocked_decent_hit_rate(tmp_db_path):
+    si = SelfImprover(db_path=tmp_db_path)
+    # 25 predictions, ~50% correct → not blocked.
+    for i in range(25):
+        pid = si.log_kronos_prediction("GOOD-USD", "1h", "UP", 0.02, 0.7, 12)
+        actual_dir = "UP" if i % 2 == 0 else "DOWN"
+        si.record_kronos_outcome(pid, actual_direction=actual_dir, actual_magnitude=0.01)
+    assert si.is_kronos_symbol_blocked("GOOD-USD") is False
+
+
+def test_is_kronos_symbol_blocked_marginal_above_threshold(tmp_db_path):
+    si = SelfImprover(db_path=tmp_db_path)
+    # 25 predictions with 6 hits = 24% > 20% threshold → not blocked.
+    for i in range(25):
+        pid = si.log_kronos_prediction("MEH-USD", "1h", "UP", 0.02, 0.7, 12)
+        actual_dir = "UP" if i < 6 else "DOWN"
+        si.record_kronos_outcome(pid, actual_direction=actual_dir, actual_magnitude=0.01)
+    assert si.is_kronos_symbol_blocked("MEH-USD") is False
+
+
+def test_is_kronos_symbol_blocked_at_threshold(tmp_db_path):
+    si = SelfImprover(db_path=tmp_db_path)
+    # 25 predictions with 5 hits = exactly 20% → blocked (<= threshold).
+    for i in range(25):
+        pid = si.log_kronos_prediction("EDGE-USD", "1h", "UP", 0.02, 0.7, 12)
+        actual_dir = "UP" if i < 5 else "DOWN"
+        si.record_kronos_outcome(pid, actual_direction=actual_dir, actual_magnitude=0.01)
+    assert si.is_kronos_symbol_blocked("EDGE-USD") is True
+
+
+# ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
 

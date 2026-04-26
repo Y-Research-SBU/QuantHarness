@@ -138,9 +138,23 @@ class MarketScanner:
 
         # L5: per-market confidence calibration (never raise).
         if self.self_improver is not None:
+            # Hard blocklist: if Kronos has demonstrably failed on this market
+            # over a meaningful sample, force confidence to zero so downstream
+            # strategies fall through their min_confidence gate.
+            try:
+                if self.self_improver.is_kronos_symbol_blocked(symbol):
+                    data["raw_confidence"] = data.get("confidence")
+                    data["confidence"] = 0.0
+                    data["kronos_blocked"] = True
+                    logger.info(
+                        "Kronos blocklist: %s suppressed (low hit rate)", symbol
+                    )
+            except Exception as exc:
+                logger.debug("Kronos blocklist check failed for %s: %s", symbol, exc)
+
             try:
                 adj = self.self_improver.get_kronos_confidence_adjustment(symbol)
-                if adj != 1.0:
+                if adj != 1.0 and not data.get("kronos_blocked"):
                     data["raw_confidence"] = data.get("confidence")
                     data["confidence"] = float(min(1.0, max(0.0, data.get("confidence", 0.0) * adj)))
                     data["confidence_adjustment"] = adj

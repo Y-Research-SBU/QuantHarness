@@ -178,6 +178,25 @@ def test_run_strategy_scoring_persists_evolution_log(tmp_db_path):
     assert any(r["strategy"] == "momentum" for r in rows)
 
 
+def test_disabled_strategy_remains_sticky_after_history_clears(tmp_db_path):
+    """A strategy disabled via run_strategy_scoring should stay disabled even
+    if its closed trades are wiped (e.g. DB compaction).
+    """
+    # Seed enough closing trades for the scorer to disable multi_factor.
+    _seed_many(tmp_db_path, "multi_factor", n_wins=2, n_losses=40)
+    si = SelfImprover(db_path=tmp_db_path)
+    si.run_strategy_scoring()
+    assert "multi_factor" in si.get_disabled_strategies()
+
+    # Wipe all closed trades — simulate DB reset / compaction.
+    with get_connection(tmp_db_path) as conn:
+        conn.execute("DELETE FROM trades")
+
+    si2 = SelfImprover(db_path=tmp_db_path)
+    # Without sticky disable, get_disabled_strategies would lose multi_factor.
+    assert "multi_factor" in si2.get_disabled_strategies()
+
+
 # ---------------------------------------------------------------------------
 # LEVEL 2: Parameter adaptation
 # ---------------------------------------------------------------------------

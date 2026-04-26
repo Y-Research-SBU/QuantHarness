@@ -220,6 +220,45 @@ class SelfImprover:
             ).fetchall()
         return {r["strategy"]: int(r["n"]) for r in rows}
 
+    def _get_sticky_disabled_strategies(self) -> List[str]:
+        """Return strategies whose most recent evolution row marked them disabled
+        with sufficient evidence.
+
+        Sticky-disable rationale: if a strategy was previously disabled on the
+        basis of >= ``min_trades_for_disable`` closed trades, it should not be
+        silently re-enabled merely because the rolling window no longer
+        contains those trades (e.g. after a DB compaction or reset). The
+        decision sticks until a rescore (with new data) flips it back.
+
+        We deliberately consult the most recent row per strategy only — if the
+        scorer later flips the flag back to enabled, that newest row wins.
+        """
+        try:
+            with get_connection(self.db_path) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT strategy, enabled, total_trades
+                    FROM strategy_evolution se1
+                    WHERE id = (
+                        SELECT MAX(id) FROM strategy_evolution se2
+                        WHERE se2.strategy = se1.strategy
+                    )
+                    """
+                ).fetchall()
+        except Exception:
+            return []
+        sticky: List[str] = []
+        for r in rows:
+            try:
+                enabled = int(r["enabled"] if hasattr(r, "keys") else r[1])
+                total = int(r["total_trades"] if hasattr(r, "keys") else r[2])
+                strat = r["strategy"] if hasattr(r, "keys") else r[0]
+            except Exception:
+                continue
+            if enabled == 0 and total >= self.min_trades_for_disable:
+                sticky.append(strat)
+        return sticky
+
     def get_strategy_weights(self) -> Dict[str, float]:
         """Sharpe → weight multiplier per strategy."""
         sharpes = self.score_strategies()
@@ -251,10 +290,25 @@ class SelfImprover:
             else:
                 # Negative but not enough trades yet → reduce but not disable.
                 weights[strat] = WEIGHT_REDUCED
+        # Sticky disable: honor prior evolution decisions for strategies
+        # that may not appear in the current scorer (e.g. zero closed trades
+        # in the active window). This protects against silent re-enablement
+        # after DB compactions or extended idle periods.
+        for strat in self._get_sticky_disabled_strategies():
+            if weights.get(strat, WEIGHT_DISABLED) != WEIGHT_DISABLED:
+                continue
+            weights[strat] = WEIGHT_DISABLED
         return weights
 
     def get_disabled_strategies(self) -> List[str]:
-        return [s for s, w in self.get_strategy_weights().items() if w == WEIGHT_DISABLED]
+        # Union of currently-disabled (from weights) + sticky-disabled
+        # strategies whose most recent evolution row says enabled=0 with
+        # sufficient trade history.
+        weight_disabled = {
+            s for s, w in self.get_strategy_weights().items() if w == WEIGHT_DISABLED
+        }
+        sticky = set(self._get_sticky_disabled_strategies())
+        return sorted(weight_disabled | sticky)
 
     def _log_strategy_evolution(
         self,

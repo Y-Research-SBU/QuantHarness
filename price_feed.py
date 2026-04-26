@@ -34,7 +34,8 @@ logger = logging.getLogger(__name__)
 # alone (and tests don't need to import dashboard).
 _BINANCE_OVERRIDES: Dict[str, str] = {
     "RNDR-USD": "renderusdt",
-    "FTM-USD": "ftmusdt",  # note: Binance moved to SONIC; retain FTM for now
+    # FTM-USD removed — yfinance reports delisted; Sonic (S/SONIC) is unavailable
+    # under any tested ticker as of 2026-04-26 (REL-339).
 }
 
 

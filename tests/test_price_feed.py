@@ -37,7 +37,6 @@ from price_feed import (
         ("SOL-USD", "solusdt"),
         ("SHIB-USD", "shibusdt"),
         ("RNDR-USD", "renderusdt"),  # override
-        ("FTM-USD", "ftmusdt"),      # override
     ],
 )
 def test_quant_to_binance_maps_crypto(quant, binance):

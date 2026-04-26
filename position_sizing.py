@@ -183,8 +183,11 @@ def calculate_position_size(
         risk_pct=round(risk_pct, 6),
         kelly_fraction=round(kelly, 6),
         half_kelly=round(half_k, 6),
-        stop_loss=round(stop_loss_price, 4),
-        take_profit=round(take_profit, 4),
+        # Round to 10 decimals to preserve precision for low-priced tokens
+        # (e.g. BONK-USD ~$0.0000063, SHIB-USD ~$0.0000062). Rounding to 4 here
+        # collapsed prices to 0.0 and produced 'stop_loss=0.0 invalid' rejections.
+        stop_loss=round(stop_loss_price, 10),
+        take_profit=round(take_profit, 10),
         reason="Position sized with Half-Kelly criterion"
     )
 

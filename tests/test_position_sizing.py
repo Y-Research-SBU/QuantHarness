@@ -264,3 +264,43 @@ def test_stop_loss_returns_numeric():
     stop = calculate_stop_loss(entry_price=100, direction="LONG")
     assert isinstance(stop, float)
     assert not math.isnan(stop)
+
+
+# ────────── Low-priced token precision (BONK/SHIB regression) ──────────
+
+
+def test_position_size_preserves_precision_for_low_priced_token_long():
+    """BONK-USD ~ $6.3e-06 must not have stop_loss/take_profit rounded to 0.0.
+
+    Regression: round(price, 4) collapsed sub-penny crypto prices to 0.0 and
+    triggered 'stop_loss=0.0 invalid' rejections in paper_trading.
+    """
+    entry = 6.3e-06  # BONK-USD
+    stop = entry * 0.97  # 3% LONG stop
+    r = calculate_position_size(
+        portfolio_balance=10000,
+        entry_price=entry,
+        stop_loss_price=stop,
+        direction="LONG",
+    )
+    assert r.stop_loss > 0, f"stop_loss collapsed to {r.stop_loss}"
+    assert r.take_profit > 0, f"take_profit collapsed to {r.take_profit}"
+    # Stop should still be below entry for a LONG trade.
+    assert r.stop_loss < entry
+    assert r.take_profit > entry
+
+
+def test_position_size_preserves_precision_for_low_priced_token_short():
+    """Same regression on the SHORT side (SHIB-USD ~ $6.2e-06)."""
+    entry = 6.2e-06  # SHIB-USD
+    stop = entry * 1.03  # 3% SHORT stop
+    r = calculate_position_size(
+        portfolio_balance=10000,
+        entry_price=entry,
+        stop_loss_price=stop,
+        direction="SHORT",
+    )
+    assert r.stop_loss > 0
+    assert r.take_profit > 0
+    assert r.stop_loss > entry
+    assert r.take_profit < entry

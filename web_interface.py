@@ -16,6 +16,64 @@ from trading_graph import TradingGraph
 
 app = Flask(__name__)
 
+SUPPORTED_PROVIDERS = ("openai", "anthropic", "qwen", "minimax", "minimax_cn")
+PROVIDER_DISPLAY_NAMES = {
+    "openai": "OpenAI",
+    "anthropic": "Anthropic",
+    "qwen": "Qwen",
+    "minimax": "MiniMax",
+    "minimax_cn": "MiniMax CN",
+}
+MINIMAX_PROVIDER_CONFIG = {
+    "minimax": {
+        "config_key": "minimax_api_key",
+        "env_key": "MINIMAX_API_KEY",
+        "fallback_env_keys": (),
+        "base_url": "https://api.minimax.io/v1",
+        "validation_model": "MiniMax-M2.7-highspeed",
+        "default_model": "MiniMax-M2.7",
+    },
+    "minimax_cn": {
+        "config_key": "minimax_cn_api_key",
+        "env_key": "MINIMAX_CN_API_KEY",
+        "fallback_env_keys": ("MINIMAX_API_KEY",),
+        "base_url": "https://api.minimaxi.com/v1",
+        "validation_model": "MiniMax-M2.7",
+        "default_model": "MiniMax-M2.7",
+    },
+}
+
+
+def apply_provider_defaults(config: Dict[str, Any], provider: str) -> None:
+    """Set provider-specific default models in a config dictionary."""
+    if provider == "anthropic":
+        if not config["agent_llm_model"].startswith("claude"):
+            config["agent_llm_model"] = "claude-haiku-4-5-20251001"
+        if not config["graph_llm_model"].startswith("claude"):
+            config["graph_llm_model"] = "claude-haiku-4-5-20251001"
+    elif provider == "qwen":
+        if not config["agent_llm_model"].startswith("qwen"):
+            config["agent_llm_model"] = "qwen3-max"
+        if not config["graph_llm_model"].startswith("qwen"):
+            config["graph_llm_model"] = "qwen3-vl-plus"
+    elif provider in MINIMAX_PROVIDER_CONFIG:
+        minimax_model = MINIMAX_PROVIDER_CONFIG[provider]["default_model"]
+        config["agent_llm_model"] = minimax_model
+        config["graph_llm_model"] = minimax_model
+    elif provider == "openai":
+        if config["agent_llm_model"].startswith(("claude", "qwen", "MiniMax")):
+            config["agent_llm_model"] = "gpt-4o-mini"
+        if config["graph_llm_model"].startswith(("claude", "qwen", "MiniMax")):
+            config["graph_llm_model"] = "gpt-4o"
+
+
+def set_active_provider(provider: str) -> None:
+    """Update analyzer and trading graph configs to use the selected provider."""
+    analyzer.config["agent_llm_provider"] = provider
+    analyzer.config["graph_llm_provider"] = provider
+    apply_provider_defaults(analyzer.config, provider)
+    analyzer.trading_graph.config.update(analyzer.config)
+
 
 class WebTradingAnalyzer:
     def __init__(self):
@@ -323,14 +381,7 @@ class WebTradingAnalyzer:
             
             # Get current provider from config
             provider = self.config.get("agent_llm_provider", "openai")
-            if provider == "openai":
-                provider_name = "OpenAI"
-            elif provider == "anthropic":
-                provider_name = "Anthropic"
-            elif provider == "minimax":
-                provider_name = "MiniMax"
-            else:
-                provider_name = "Qwen"
+            provider_name = PROVIDER_DISPLAY_NAMES.get(provider, provider)
 
             # Check for specific API key authentication errors
             if (
@@ -542,23 +593,33 @@ class WebTradingAnalyzer:
                 _ = llm.invoke([("user", "Hello")])
 
                 provider_name = "Qwen"
-            else:  # minimax
+            elif provider in MINIMAX_PROVIDER_CONFIG:
                 from openai import OpenAI as _OpenAI
-                api_key = os.environ.get("MINIMAX_API_KEY") or self.config.get("minimax_api_key", "")
+                minimax_config = MINIMAX_PROVIDER_CONFIG[provider]
+                api_key = self.config.get(minimax_config["config_key"], "")
+                if not api_key:
+                    api_key = os.environ.get(minimax_config["env_key"])
+                if not api_key:
+                    for env_key in minimax_config["fallback_env_keys"]:
+                        api_key = os.environ.get(env_key)
+                        if api_key:
+                            break
                 if not api_key:
                     return {
                         "valid": False,
-                        "error": "❌ Invalid API Key: The MiniMax API key is not set. Please update it in the Settings section.",
+                        "error": f"❌ Invalid API Key: The {PROVIDER_DISPLAY_NAMES[provider]} API key is not set. Please update it in the Settings section.",
                     }
 
-                client = _OpenAI(api_key=api_key, base_url="https://api.minimax.io/v1")
+                client = _OpenAI(api_key=api_key, base_url=minimax_config["base_url"])
                 _ = client.chat.completions.create(
-                    model="MiniMax-M2.7-highspeed",
+                    model=minimax_config["validation_model"],
                     messages=[{"role": "user", "content": "Hello"}],
                     max_tokens=5,
                 )
 
-                provider_name = "MiniMax"
+                provider_name = PROVIDER_DISPLAY_NAMES[provider]
+            else:
+                return {"valid": False, "error": f"Unsupported provider: {provider}"}
             return {"valid": True, "message": f"{provider_name} API key is valid"}
 
         except Exception as e:
@@ -567,14 +628,7 @@ class WebTradingAnalyzer:
             # Determine provider name for error messages
             if provider is None:
                 provider = self.config.get("agent_llm_provider", "openai")
-            if provider == "openai":
-                provider_name = "OpenAI"
-            elif provider == "anthropic":
-                provider_name = "Anthropic"
-            elif provider == "minimax":
-                provider_name = "MiniMax"
-            else:
-                provider_name = "Qwen"
+            provider_name = PROVIDER_DISPLAY_NAMES.get(provider, provider)
 
             if (
                 "authentication" in error_msg.lower()
@@ -891,48 +945,27 @@ def update_provider():
         data = request.get_json()
         provider = data.get("provider", "openai")
 
-        if provider not in ["openai", "anthropic", "qwen", "minimax"]:
-            return jsonify({"error": "Provider must be 'openai', 'anthropic', 'qwen', or 'minimax'"})
+        if provider not in SUPPORTED_PROVIDERS:
+            return jsonify({"error": f"Provider must be one of {', '.join(SUPPORTED_PROVIDERS)}"})
 
         print(f"Updating provider to: {provider}")
 
-        # Update config in both analyzer and trading_graph
-        analyzer.config["agent_llm_provider"] = provider
-        analyzer.config["graph_llm_provider"] = provider
-        analyzer.trading_graph.config["agent_llm_provider"] = provider
-        analyzer.trading_graph.config["graph_llm_provider"] = provider
-        
-        # Update model names if switching providers
-        if provider == "anthropic":
-            # Set default Claude models if not already set to Anthropic models
-            if not analyzer.config["agent_llm_model"].startswith("claude"):
-                analyzer.config["agent_llm_model"] = "claude-haiku-4-5-20251001"
-            if not analyzer.config["graph_llm_model"].startswith("claude"):
-                analyzer.config["graph_llm_model"] = "claude-haiku-4-5-20251001"
-        elif provider == "qwen":
-            # Set default Qwen models if not already set to Qwen models
-            if not analyzer.config["agent_llm_model"].startswith("qwen"):
-                analyzer.config["agent_llm_model"] = "qwen3-max"
-            if not analyzer.config["graph_llm_model"].startswith("qwen"):
-                analyzer.config["graph_llm_model"] = "qwen3-vl-plus"
-        elif provider == "minimax":
-            # Set default MiniMax models if not already set to MiniMax models
-            if not analyzer.config["agent_llm_model"].startswith("MiniMax"):
-                analyzer.config["agent_llm_model"] = "MiniMax-M2.7"
-            if not analyzer.config["graph_llm_model"].startswith("MiniMax"):
-                analyzer.config["graph_llm_model"] = "MiniMax-M2.7"
-
-        else:
-            # Set default OpenAI models if not already set to OpenAI models
-            if analyzer.config["agent_llm_model"].startswith(("claude", "qwen", "MiniMax")):
-                analyzer.config["agent_llm_model"] = "gpt-4o-mini"
-            if analyzer.config["graph_llm_model"].startswith(("claude", "qwen", "MiniMax")):
-                analyzer.config["graph_llm_model"] = "gpt-4o"
-        
-        analyzer.trading_graph.config.update(analyzer.config)
+        set_active_provider(provider)
 
         # Refresh the trading graph with new provider
-        analyzer.trading_graph.refresh_llms()
+        try:
+            analyzer.trading_graph.refresh_llms()
+        except ValueError as refresh_error:
+            if "API key not found" not in str(refresh_error):
+                raise
+            print(f"Provider updated to {provider}; waiting for API key")
+            return jsonify(
+                {
+                    "success": True,
+                    "needs_api_key": True,
+                    "message": f"Provider updated to {provider}. Please set its API key.",
+                }
+            )
 
         print(f"Provider updated to {provider} successfully")
         print(f"graph_llm_model updated to {analyzer.config['graph_llm_model']} successfully")
@@ -955,8 +988,8 @@ def update_api_key():
         if not new_api_key:
             return jsonify({"error": "API key is required"})
 
-        if provider not in ["openai", "anthropic", "qwen", "minimax"]:
-            return jsonify({"error": "Provider must be 'openai', 'anthropic', 'qwen', or 'minimax'"})
+        if provider not in SUPPORTED_PROVIDERS:
+            return jsonify({"error": f"Provider must be one of {', '.join(SUPPORTED_PROVIDERS)}"})
 
         print(f"Updating {provider} API key to: {new_api_key[:8]}...{new_api_key[-4:]}")
 
@@ -969,12 +1002,32 @@ def update_api_key():
             os.environ["DASHSCOPE_API_KEY"] = new_api_key
         elif provider == "minimax":
             os.environ["MINIMAX_API_KEY"] = new_api_key
+        elif provider == "minimax_cn":
+            os.environ["MINIMAX_CN_API_KEY"] = new_api_key
 
-        # Update the API key in the trading graph
+        set_active_provider(provider)
+
+        # Keep analyzer.config in sync for status checks and error messages.
+        if provider == "openai":
+            analyzer.config["api_key"] = new_api_key
+        elif provider == "anthropic":
+            analyzer.config["anthropic_api_key"] = new_api_key
+        elif provider == "qwen":
+            analyzer.config["qwen_api_key"] = new_api_key
+        elif provider == "minimax":
+            analyzer.config["minimax_api_key"] = new_api_key
+        elif provider == "minimax_cn":
+            analyzer.config["minimax_cn_api_key"] = new_api_key
+
+        analyzer.trading_graph.config.update(analyzer.config)
+
+        # Update the API key in the trading graph and refresh with the active provider.
         analyzer.trading_graph.update_api_key(new_api_key, provider=provider)
+        analyzer.config.update(analyzer.trading_graph.config)
 
         print(f"{provider} API key updated successfully")
-        return jsonify({"success": True, "message": f"{provider.capitalize()} API key updated successfully"})
+        provider_name = PROVIDER_DISPLAY_NAMES.get(provider, provider)
+        return jsonify({"success": True, "message": f"{provider_name} API key updated successfully"})
 
     except Exception as e:
         print(f"Error in update_api_key: {str(e)}")
@@ -1004,10 +1057,16 @@ def get_api_key_status():
             if not api_key and hasattr(analyzer, 'config'):
                 api_key = analyzer.config.get("qwen_api_key", "")
         elif provider == "minimax":
-            api_key = os.environ.get("MINIMAX_API_KEY", "")
-            # Fallback to config if not in environment
-            if not api_key and hasattr(analyzer, 'config'):
-                api_key = analyzer.config.get("minimax_api_key", "")
+            api_key = analyzer.config.get("minimax_api_key", "") if hasattr(analyzer, 'config') else ""
+            # Fallback to environment if not in config
+            if not api_key:
+                api_key = os.environ.get("MINIMAX_API_KEY", "")
+        elif provider == "minimax_cn":
+            api_key = analyzer.config.get("minimax_cn_api_key", "") if hasattr(analyzer, 'config') else ""
+            if not api_key:
+                api_key = os.environ.get("MINIMAX_CN_API_KEY", "")
+            if not api_key:
+                api_key = os.environ.get("MINIMAX_API_KEY", "")
         else:
             api_key = ""
         

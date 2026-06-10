@@ -187,7 +187,7 @@
             border-color: var(--gray-300);
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
         }
-        
+
         /* Glow or Gradient Border on Active Fields */
         input[type="time"]:focus, input[type="date"]:focus {
             border: 1px solid #9b6bff;
@@ -220,13 +220,13 @@
              box-shadow: 0 8px 25px rgba(86, 39, 216, 0.4);
              background: var(--etrade-purple);
          }
-         
+
          .btn-primary:disabled {
              opacity: 0.7;
              cursor: not-allowed;
              transform: none;
          }
-         
+
          /* Enhanced Button Styles */
          .btn {
              display: inline-flex;
@@ -245,7 +245,7 @@
              overflow: hidden;
              box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
          }
-         
+
          .btn::before {
              content: '';
              position: absolute;
@@ -256,48 +256,48 @@
              background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
              transition: left 0.5s;
          }
-         
+
          .btn:hover::before {
              left: 100%;
          }
-         
+
          .btn-outline-primary {
              background: transparent;
              color: var(--etrade-purple);
              border: 2px solid var(--etrade-purple);
              box-shadow: 0 2px 8px rgba(36, 16, 86, 0.1);
          }
-         
+
          .btn-outline-primary:hover {
              background: var(--etrade-purple);
              color: var(--white);
              transform: translateY(-2px);
              box-shadow: 0 8px 20px rgba(36, 16, 86, 0.3);
          }
-         
+
          .btn-outline-primary:active {
              transform: translateY(0);
              box-shadow: 0 4px 12px rgba(36, 16, 86, 0.2);
          }
-         
+
          .btn-outline-primary:disabled {
              opacity: 0.6;
              cursor: not-allowed;
              transform: none;
              box-shadow: 0 2px 8px rgba(36, 16, 86, 0.1);
          }
-         
+
          .btn-outline-primary:disabled:hover {
              background: transparent;
              color: var(--etrade-purple);
              transform: none;
              box-shadow: 0 2px 8px rgba(36, 16, 86, 0.1);
          }
-         
+
          .fa-spin {
              animation: fa-spin 2s infinite linear;
          }
-         
+
          @keyframes fa-spin {
              0% { transform: rotate(0deg); }
              100% { transform: rotate(360deg); }
@@ -372,7 +372,7 @@
 
                  .me-3 { margin-right: 0.75rem; }
          .mt-1 { margin-top: 0.25rem; }
-         
+
          /* Asset Button Grid Styles */
          .asset-button-grid {
              display: grid;
@@ -380,7 +380,7 @@
              gap: 0.75rem;
              margin-top: 0.5rem;
          }
-         
+
          .asset-btn {
              background: var(--gray-100);
              border: 2px solid var(--gray-200);
@@ -398,14 +398,14 @@
              min-height: 80px;
              justify-content: center;
          }
-         
+
          .asset-btn:hover {
              background: var(--gray-200);
              border-color: var(--etrade-purple-light);
              transform: translateY(-2px);
              box-shadow: 0 4px 12px rgba(86, 39, 216, 0.15);
          }
-         
+
          .asset-btn.active {
              background: var(--etrade-purple-light);
              border-color: var(--etrade-purple-light);
@@ -413,29 +413,29 @@
              transform: translateY(-2px);
              box-shadow: 0 8px 20px rgba(86, 39, 216, 0.3);
          }
-         
+
          .asset-btn i {
              font-size: 1.5rem;
              margin-bottom: 0.25rem;
          }
-         
+
          .custom-asset-btn {
              background: linear-gradient(135deg, var(--gray-100) 0%, var(--gray-200) 100%);
              border: 2px dashed var(--gray-400);
          }
-         
+
          .custom-asset-btn:hover {
              background: linear-gradient(135deg, var(--etrade-purple-light) 0%, var(--etrade-purple) 100%);
              border-color: var(--etrade-purple-light);
              color: var(--white);
          }
-         
+
          .input-group {
              display: flex;
              gap: 0.75rem;
              align-items: stretch;
          }
-         
+
          .input-group .form-control {
              flex: 1;
              border-radius: 12px;
@@ -444,13 +444,13 @@
              font-size: 0.95rem;
              transition: all 0.3s ease;
          }
-         
+
          .input-group .form-control:focus {
              border-color: var(--etrade-purple);
              box-shadow: 0 0 0 3px rgba(36, 16, 86, 0.1);
              outline: none;
          }
-         
+
          .input-group .btn {
              border-radius: 12px;
              white-space: nowrap;
@@ -464,7 +464,7 @@
              gap: 2rem;
              margin-bottom: 2rem;
          }
-         
+
          .panel {
              background: var(--white);
              border: 2px solid var(--gray-200);
@@ -473,12 +473,12 @@
              box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
              transition: all 0.3s ease;
          }
-         
+
          .panel:hover {
              border-color: var(--etrade-purple-light);
              box-shadow: 0 8px 24px rgba(86, 39, 216, 0.1);
          }
-         
+
          .panel-title {
              color: var(--etrade-purple);
              font-weight: 600;
@@ -491,7 +491,7 @@
              justify-content: center;
              gap: 0.75rem;
          }
-         
+
          .panel-title i {
              font-size: 1.5rem;
              color: var(--etrade-purple-light);
@@ -501,12 +501,12 @@
              background-clip: text;
              filter: drop-shadow(0 2px 4px rgba(86, 39, 216, 0.2));
          }
-         
+
          .action-panel .panel-title {
              color: var(--white);
              border-bottom-color: rgba(255, 255, 255, 0.2);
          }
-         
+
          .action-panel .panel-title i {
              color: var(--white);
              background: linear-gradient(135deg, var(--white) 0%, rgba(255, 255, 255, 0.8) 100%);
@@ -515,7 +515,7 @@
              background-clip: text;
              filter: drop-shadow(0 2px 4px rgba(255, 255, 255, 0.3));
          }
-         
+
          /* Modern Hero Button */
          .hero-btn {
              display: inline-flex;
@@ -533,7 +533,7 @@
              position: relative;
              overflow: hidden;
          }
-         
+
          .hero-btn::before {
              content: '';
              position: absolute;
@@ -544,37 +544,37 @@
              background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
              transition: left 0.6s;
          }
-         
+
          .hero-btn:hover::before {
              left: 100%;
          }
-         
+
          .hero-btn:hover {
              transform: translateY(-3px);
              box-shadow: 0 12px 35px rgba(86, 39, 216, 0.4);
              background: linear-gradient(135deg, var(--etrade-purple) 0%, var(--etrade-purple-light) 100%);
          }
-         
+
          .hero-btn:active {
              transform: translateY(-1px);
              box-shadow: 0 6px 20px rgba(86, 39, 216, 0.3);
          }
-         
+
          .hero-btn-text {
              position: relative;
              z-index: 1;
          }
-         
+
          .hero-btn-icon {
              position: relative;
              z-index: 1;
              transition: transform 0.3s ease;
          }
-         
+
          .hero-btn:hover .hero-btn-icon {
              transform: translateX(4px);
          }
-         
+
          /* Modern Header Button */
          .header-btn {
              display: inline-flex;
@@ -591,7 +591,7 @@
              box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
              border: 2px solid transparent;
          }
-         
+
          .header-btn:hover {
              background: var(--etrade-purple);
              color: var(--white);
@@ -599,67 +599,67 @@
              box-shadow: 0 8px 25px rgba(36, 16, 86, 0.2);
              border-color: var(--etrade-purple);
          }
-         
+
          .header-btn:active {
              transform: translateY(0);
              box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
          }
-         
+
          .header-btn-text {
              position: relative;
              z-index: 1;
          }
-         
+
          .header-btn-icon {
              position: relative;
              z-index: 1;
              transition: transform 0.3s ease;
          }
-         
+
          .header-btn:hover .header-btn-icon {
              transform: translateX(3px);
          }
-         
+
          .action-panel {
              grid-column: 1 / -1;
              background: var(--white);
              border: 2px solid var(--gray-200);
              color: var(--gray-800);
          }
-         
+
          .action-panel .panel-title {
              color: var(--white);
              border-bottom-color: rgba(255, 255, 255, 0.2);
          }
-         
+
          .form-group {
              margin-bottom: 1.5rem;
          }
-         
+
          .form-group:last-child {
              margin-bottom: 0;
          }
-         
+
          /* Security Panel Styles */
          .security-panel {
              background: #FEFBF3;
              border: 2px solid #E5E7EB;
              border-radius: 16px;
          }
-         
+
          .security-panel .panel-title {
              color: #374151;
              border-bottom: 2px solid #E5E7EB;
              margin-bottom: 1.5rem;
              padding-bottom: 1rem;
          }
-         
+
          .security-info {
              display: flex;
              flex-direction: column;
              gap: 1.5rem;
          }
-         
+
          .security-item {
              display: flex;
              align-items: flex-start;
@@ -670,7 +670,7 @@
              border: 1px solid #F3F4F6;
              box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
          }
-         
+
          .security-icon {
              color: #F59E0B;
              font-size: 1.3rem;
@@ -680,37 +680,37 @@
              padding: 0.5rem;
              border-radius: 8px;
          }
-         
+
          .security-content {
              color: #374151;
              line-height: 1.6;
          }
-         
+
          .security-content strong {
              color: #1F2937;
              font-size: 1.1rem;
              display: block;
              margin-bottom: 0.5rem;
          }
-         
+
          .security-content p {
              margin: 0;
              color: #6B7280;
          }
-         
+
          /* Title Styles */
          .title-main {
              display: inline;
              font-weight: 700;
          }
-         
+
          .title-highlight {
              display: inline;
              font-weight: 700;
              color: white;
              position: relative;
          }
-         
+
          .title-highlight::after {
              content: '';
              position: absolute;
@@ -721,7 +721,7 @@
              background: var(--etrade-purple-light);
              border-radius: 1px;
          }
-         
+
          /* Mobile title adjustments */
          @media (max-width: 768px) {
              .h1 {
@@ -741,7 +741,7 @@
              position: relative;
              overflow: hidden;
          }
-         
+
          .timeframe-btn {
              flex: 1;
              background: transparent;
@@ -757,20 +757,20 @@
              min-width: 0;
              text-align: center;
          }
-         
+
          .timeframe-btn:hover {
              background: rgba(86, 39, 216, 0.1);
              color: var(--etrade-purple);
              transform: translateY(-1px);
          }
-         
+
          .timeframe-btn.active {
              background: var(--etrade-purple-light);
              color: var(--white);
              box-shadow: 0 4px 12px rgba(86, 39, 216, 0.3);
              transform: translateY(-1px);
          }
-         
+
          .timeframe-btn.active::before {
              content: '';
              position: absolute;
@@ -784,7 +784,7 @@
              opacity: 0.8;
              animation: glow 2s ease-in-out infinite alternate;
          }
-         
+
          @keyframes glow {
              from {
                  box-shadow: 0 0 5px rgba(86, 39, 216, 0.5);
@@ -793,7 +793,7 @@
                  box-shadow: 0 0 20px rgba(86, 39, 216, 0.8), 0 0 30px rgba(86, 39, 216, 0.4);
              }
          }
-         
+
          /* Mobile responsive */
          @media (max-width: 768px) {
              .timeframe-selector {
@@ -801,11 +801,11 @@
                  scrollbar-width: none;
                  -ms-overflow-style: none;
              }
-             
+
              .timeframe-selector::-webkit-scrollbar {
                  display: none;
              }
-             
+
              .timeframe-btn {
                  flex-shrink: 0;
                  min-width: 60px;
@@ -827,36 +827,36 @@
              .col-md-6, .col-md-4 { flex: 0 0 100%; max-width: 100%; }
              .form-container { margin: 1rem; border-radius: 16px; }
              .form-section, .results-section { padding: 2rem 1rem; }
-             
+
              /* Mobile panel layout */
              .panel-group {
                  grid-template-columns: 1fr;
                  gap: 1rem;
              }
-             
+
              .panel {
                  padding: 1rem;
              }
-             
+
              /* Mobile banner adjustments */
              .hero-section img {
                  max-width: 80%;
                  margin: 2rem auto;
                  display: block;
              }
-             
+
              /* Mobile asset button grid */
              .asset-button-grid {
                  grid-template-columns: repeat(2, 1fr);
                  gap: 0.5rem;
              }
-             
+
              .asset-btn {
                  padding: 0.75rem 0.5rem;
                  font-size: 0.9rem;
                  min-height: 70px;
              }
-             
+
              .asset-btn i {
                  font-size: 1.2rem;
              }
@@ -880,14 +880,14 @@
 
                         <!-- Hero content -->
                         <div class="relative max-w-xl mx-auto md:max-w-none text-center md:text-left">
-                        
+
                                                     <!-- Content -->
                         <div class="md:w-[800px] mx-auto text-center">
 
                                 <!-- Copy -->
                                 <h1 class="h1 text-white mb-6">
                                     <div class="text-center">
-                                        
+
                                     </div>
                                     <div style="display: flex; align-items: center; justify-content: center; gap: 0rem; margin-bottom: 0.5rem;">
                                         <img src="assets/darklogo.png" alt="QuantAgent Logo" style="width: 7rem; height: 7rem; object-fit: contain; background: transparent; box-shadow: none; border: none; border-radius: 0; transform: translateY(0.5rem);">
@@ -910,15 +910,15 @@
                                         </a>
                                     </div>
                                 </div>
-                                
+
                             </div>
-                        
+
                             <!-- Parent container with relative positioning -->
                 <!-- <div class="w-full md:w-[500px] mt-10 md:mt-0 md:ml-10 flex-shrink-0">
                         <img src="assets/banner.png" alt="QuantAgent Banner" class="w-full h-auto rounded-lg shadow-xl" />
                     </div> -->
 
-                        
+
                         </div>
 
                     </div>
@@ -933,14 +933,14 @@
                         <h3 style="text-align: center; font-size: 1.6rem; font-weight: 600; color: var(--etrade-purple); margin-bottom: 2rem; display: flex; align-items: center; justify-content: center; gap: 0.75rem;">
                             <i class="fas fa-cog" style="font-size: 1.5rem; color: var(--etrade-purple-light);"></i> Analysis Configuration
                         </h3>
-                        
+
                         <!-- Panel 1: Data Selection -->
                         <div class="panel-group">
                             <div class="panel">
                                 <h4 class="panel-title">
                                     <i class="fas fa-database"></i> Data Selection
                                 </h4>
-                                
+
                                 <!-- Asset Selection -->
                                 <div class="form-group">
                                     <label class="form-label">
@@ -969,7 +969,7 @@
                                             <i class="fas fa-plus"></i> Custom
                                         </button>
                                     </div>
-                                    
+
                                     <!-- Custom Asset Input -->
                                     <div id="customAssetDiv" class="mt-3" style="display: none;">
                                         <div class="alert alert-info">
@@ -986,7 +986,7 @@
                                         <small class="form-text text-muted">Use Yahoo Finance symbols. For futures, add =F suffix (e.g., NQ=F)</small>
                                     </div>
                                 </div>
-                                
+
                                 <!-- Timeframe Selection -->
                                 <div class="form-group">
                                     <label class="form-label">
@@ -1017,13 +1017,13 @@
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <!-- Panel 2: Date & Time Configuration -->
                             <div class="panel">
                                 <h4 class="panel-title">
                                     <i class="fas fa-calendar-alt"></i> Date & Time Configuration
                                 </h4>
-                                
+
                                 <!-- Date Range -->
                                 <div class="form-group">
                                     <label class="form-label" style="font-size: 1.2rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">
@@ -1038,7 +1038,7 @@
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <!-- Time Selector -->
                                 <div class="form-group">
                                     <label class="form-label" style="font-size: 1.2rem; font-weight: 600; color: #374151; margin-bottom: 0.75rem;">
@@ -1053,7 +1053,7 @@
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <!-- Current Time Option -->
                                 <div class="form-group">
                                     <div class="form-check" style="margin-top: 1rem;">
@@ -1063,27 +1063,27 @@
                                         </label>
                                     </div>
                                 </div>
-                                
+
                                 <!-- Validation Messages -->
                                 <div id="dateRangeInfo" class="alert alert-info mt-2" style="display: none;">
                                     <i class="fas fa-info-circle"></i>
                                     <span id="dateRangeText"></span>
                                 </div>
-                                
+
                                 <div id="dateRangeError" class="alert alert-danger mt-2" style="display: none;">
                                     <i class="fas fa-exclamation-triangle"></i>
                                     <span id="dateRangeErrorText"></span>
                                 </div>
                             </div>
                         </div>
-                        
+
                         <!-- Panel 3: Settings & Security -->
                         <div class="panel-group">
                             <div class="panel">
                                 <h4 class="panel-title">
                                     <i class="fas fa-cog"></i> Settings
                                 </h4>
-                                
+
                                 <!-- LLM Provider Selection -->
                                 <div class="form-group">
                                     <label class="form-label">LLM Provider</label>
@@ -1093,9 +1093,10 @@
                                         <option value="qwen">Qwen</option>
                                         <option value="minimax">MiniMax</option>
                                         <option value="minimax_cn">MiniMax CN</option>
+                                        <option value="lm_studio">LM Studio</option>
                                     </select>
                                 </div>
-                                
+
                                 <!-- OpenAI API Key Input -->
                                 <div class="form-group" id="openaiApiKeyGroup">
                                     <label class="form-label">OpenAI API Key</label>
@@ -1106,7 +1107,7 @@
                                         </button>
                                     </div>
                                 </div>
-                                
+
                                 <!-- Anthropic API Key Input -->
                                 <div class="form-group" id="anthropicApiKeyGroup" style="display: none;">
                                     <label class="form-label">Anthropic API Key</label>
@@ -1117,7 +1118,7 @@
                                         </button>
                                     </div>
                                 </div>
-                                
+
                                 <!-- Qwen API Key Input -->
                                 <div class="form-group" id="qwenApiKeyGroup" style="display: none;">
                                     <label class="form-label">Qwen API Key (Dashscope)</label>
@@ -1150,7 +1151,18 @@
                                         </button>
                                     </div>
                                 </div>
-                                    
+
+                                <!-- LM Studio API Key Input -->
+                                <div class="form-group" id="lmStudioApiKeyGroup" style="display: none;">
+                                    <label class="form-label">LM Studio API Key</label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control" id="lmStudioApiKeyInput" placeholder="Enter your LM Studio API key">
+                                        <button class="btn btn-outline-primary" type="button" onclick="updateApiKey('lm_studio')">
+                                            <i class="fas fa-save"></i> Update
+                                        </button>
+                                    </div>
+                                </div>
+
                                     <!-- API Key Status Messages -->
                                     <div id="apiKeyStatus" class="alert alert-info mt-2" style="display: none;">
                                         <i class="fas fa-info-circle"></i>
@@ -1165,13 +1177,13 @@
                                         <span id="apiKeySuccessText"></span>
                                     </div>
                             </div>
-                            
+
                             <!-- Security Information Panel -->
                             <div class="panel security-panel">
                                 <h4 class="panel-title">
                                     <i class="fas fa-shield-alt"></i> Security Information
                                 </h4>
-                                
+
                                 <div class="security-info">
                                     <div class="security-item">
                                         <i class="fas fa-server security-icon"></i>
@@ -1180,7 +1192,7 @@
                                             <p>This server runs exclusively on localhost (127.0.0.1)</p>
                                         </div>
                                     </div>
-                                    
+
                                     <div class="security-item">
                                         <i class="fas fa-key security-icon"></i>
                                         <div class="security-content">
@@ -1188,7 +1200,7 @@
                                             <p>Your API key is stored locally and never uploaded to external servers</p>
                                         </div>
                                     </div>
-                                    
+
                                     <div class="security-item">
                                         <i class="fas fa-shield-alt security-icon"></i>
                                         <div class="security-content">
@@ -1199,7 +1211,7 @@
                                 </div>
                             </div>
                         </div>
-                        
+
                         <!-- Run Analysis Button -->
                         <div class="text-center" style="margin-top: 2rem;">
                             <button class="btn btn-primary btn-lg" id="analyzeBtn" onclick="runAnalysis()" style="padding: 1.5rem 3rem; font-size: 1.3rem; border-radius: 15px;">
@@ -1218,7 +1230,7 @@
         // Global variables
         let currentAsset = '';
         let currentTimeframe = '';
-        
+
         // Persisted state keys
         const STORAGE_KEYS = {
             CUSTOM_ASSETS: 'quantagent_custom_assets',
@@ -1403,22 +1415,22 @@
             // Set default dates
             const now = new Date();
             const thirtyDaysAgo = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
-            
+
             // Format dates for input fields
             const formatDate = (date) => {
                 return date.toISOString().split('T')[0];
             };
-            
+
             // Set default start date (30 days ago)
             document.getElementById('startDate').value = formatDate(thirtyDaysAgo);
-            
+
             // Set default end date (today)
             document.getElementById('endDate').value = formatDate(now);
-            
+
             // Apply the current-time checkbox behavior immediately on load
             // (this will disable & populate end date/time if the checkbox is checked by default)
             try { handleUseCurrentTimeChange(); } catch (e) { console.warn('handleUseCurrentTimeChange not available yet', e); }
-            
+
             // Load custom assets and server-synced assets
             loadCustomAssets();
 
@@ -1470,34 +1482,34 @@
             }
 
             document.getElementById('useCurrentTime').addEventListener('change', handleUseCurrentTimeChange);
-            
+
             // Set up date/time validation
             const dateInputs = ['startDate', 'startTime', 'endDate', 'endTime'];
             dateInputs.forEach(id => {
                 document.getElementById(id).addEventListener('change', validateDateRange);
             });
-            
+
             // Initialize current time update
             setInterval(updateCurrentTime, 1000);
-            
+
             // Add keyboard navigation for timeframe selector
             document.addEventListener('keydown', function(e) {
                 const activeBtn = document.querySelector('.timeframe-btn.active');
                 if (!activeBtn) return;
-                
+
                 const buttons = Array.from(document.querySelectorAll('.timeframe-btn'));
                 const currentIndex = buttons.indexOf(activeBtn);
-                
+
                 if (e.key === 'ArrowLeft' && currentIndex > 0) {
                     buttons[currentIndex - 1].click();
                 } else if (e.key === 'ArrowRight' && currentIndex < buttons.length - 1) {
                     buttons[currentIndex + 1].click();
                 }
             });
-            
+
             // Check API key status on page load
             checkApiKeyStatus();
-            
+
             // Set initial provider dropdown state
             const savedProvider = localStorage.getItem('quantagent_provider') || 'openai';
             if (savedProvider) {
@@ -1505,7 +1517,7 @@
                 handleProviderChange();
             }
         });
-        
+
         function checkApiKeyStatus() {
             const provider = document.getElementById('llmProviderSelect')?.value || 'openai';
             fetch(`/api/get-api-key-status?provider=${provider}`)
@@ -1521,10 +1533,11 @@
                         'anthropic': 'Anthropic',
                         'qwen': 'Qwen',
                         'minimax': 'MiniMax',
-                        'minimax_cn': 'MiniMax CN'
+                        'minimax_cn': 'MiniMax CN',
+                        'lm_studio': 'LM Studio'
                     };
                     const providerName = providerNames[provider] || provider;
-                    
+
                     if (data.error) {
                         console.error('API key status error:', data.error);
                         // Don't show error if it's just that no key is set
@@ -1544,20 +1557,20 @@
                     // Silently fail - don't show error to user
                 });
         }
-        
+
                  // Global variables
          let selectedAsset = '';
          let selectedTimeframe = '1h'; // Default timeframe
-         
+
          function selectAsset(button, asset) {
              // Remove active class from all asset buttons
              document.querySelectorAll('.asset-btn').forEach(btn => {
                  btn.classList.remove('active');
              });
-             
+
              // Add active class to clicked button
              button.classList.add('active');
-             
+
              // Store selected asset
              selectedAsset = asset;
              try {
@@ -1572,21 +1585,21 @@
 
              console.log('Selected asset:', asset);
          }
-         
+
          function showCustomAssetInput() {
              // Remove active class from all asset buttons
              document.querySelectorAll('.asset-btn').forEach(btn => {
                  btn.classList.remove('active');
              });
-             
+
              // Show custom asset input
              document.getElementById('customAssetDiv').style.display = 'block';
              document.getElementById('customAssetInput').focus();
-             
+
              // Clear selected asset
              selectedAsset = '';
          }
-         
+
          function confirmCustomAsset() {
              const customAssetEl = document.getElementById('customAssetInput');
              const customAsset = customAssetEl.value.trim();
@@ -1644,39 +1657,39 @@
             // Use a non-blocking notification (replace alert with console + subtle DOM message if desired)
             console.log(`Custom asset "${symbol}" selected and persisted`);
          }
-        
+
                  function runAnalysis() {
              const dataSource = 'live'; // Always use live data
              const timeframe = selectedTimeframe;
-             
+
              // Get asset value from selected asset
              let asset = selectedAsset;
-             
+
              // Validate inputs
              if (!asset || !timeframe) {
                  alert('Please select both asset and timeframe.');
                  return;
              }
-             
+
              // Get date and time values
              const startDate = document.getElementById('startDate').value;
              const startTime = document.getElementById('startTime').value;
              const endDate = document.getElementById('endDate').value;
              const endTime = document.getElementById('endTime').value;
              const useCurrentTime = document.getElementById('useCurrentTime').checked;
-             
+
              // Validate dates
              if (!startDate || !endDate) {
                  alert('Please select both start and end dates.');
                  return;
              }
-             
+
              // Show loading state
              const analyzeBtn = document.getElementById('analyzeBtn');
              const originalText = analyzeBtn.innerHTML;
              analyzeBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
              analyzeBtn.disabled = true;
-             
+
              // Prepare request data
              const requestData = {
                  data_source: dataSource,
@@ -1689,7 +1702,7 @@
                  use_current_time: useCurrentTime,
                  redirect_to_output: true
              };
-             
+
              // Make API call
              fetch('/api/analyze', {
                  method: 'POST',
@@ -1730,27 +1743,27 @@
                  analyzeBtn.disabled = false;
              });
         }
-        
+
         function handleUseCurrentTimeChange() {
             const useCurrentTime = document.getElementById('useCurrentTime');
             const endTimeInput = document.getElementById('endTime');
             const endDateInput = document.getElementById('endDate');
-            
+
             if (useCurrentTime.checked) {
                 // Lock both end date and end time
                 endTimeInput.disabled = true;
                 endDateInput.disabled = true;
                 endTimeInput.style.opacity = '0.5';
                 endDateInput.style.opacity = '0.5';
-                
+
                 // Set to current date and time
                 const now = new Date();
                 const currentDate = now.toISOString().split('T')[0];
                 const currentTime = now.toTimeString().slice(0, 5); // HH:MM format
-                
+
                 endDateInput.value = currentDate;
                 endTimeInput.value = currentTime;
-                
+
                 // Add visual indication
                 endDateInput.title = 'Locked: Using current date/time';
                 endTimeInput.title = 'Locked: Using current date/time';
@@ -1760,30 +1773,30 @@
                 endDateInput.disabled = false;
                 endTimeInput.style.opacity = '1';
                 endDateInput.style.opacity = '1';
-                
+
                 // Remove visual indication
                 endDateInput.title = '';
                 endTimeInput.title = '';
             }
         }
-        
+
         function updateCurrentTime() {
             const useCurrentTime = document.getElementById('useCurrentTime');
             if (useCurrentTime.checked) {
                 const now = new Date();
                 const currentDate = now.toISOString().split('T')[0];
                 const currentTime = now.toTimeString().slice(0, 5); // HH:MM format
-                
+
                 document.getElementById('endDate').value = currentDate;
                 document.getElementById('endTime').value = currentTime;
             }
         }
-        
+
         function validateDateRange() {
             // Simple date validation
             const startDate = document.getElementById('startDate').value;
             const endDate = document.getElementById('endDate').value;
-            
+
             if (startDate && endDate && startDate > endDate) {
                 document.getElementById('dateRangeError').style.display = 'block';
                 document.getElementById('dateRangeErrorText').textContent = 'Start date cannot be after end date';
@@ -1791,17 +1804,17 @@
                 document.getElementById('dateRangeError').style.display = 'none';
             }
         }
-        
+
         function hideDateValidation() {
             document.getElementById('dateRangeError').style.display = 'none';
             document.getElementById('dateRangeInfo').style.display = 'none';
         }
-        
+
                  function updateTimeframeLimits() {
              // Placeholder for timeframe limits functionality
              console.log('Timeframe limits updated');
          }
-         
+
          // Provider and API Key Management Functions
          function handleProviderChange() {
              const provider = document.getElementById('llmProviderSelect').value;
@@ -1810,6 +1823,7 @@
              const qwenGroup = document.getElementById('qwenApiKeyGroup');
              const minimaxGroup = document.getElementById('minimaxApiKeyGroup');
              const minimaxCnGroup = document.getElementById('minimaxCnApiKeyGroup');
+             const lmStudioGroup = document.getElementById('lmStudioApiKeyGroup');
 
              // Hide all groups first
              openaiGroup.style.display = 'none';
@@ -1817,6 +1831,7 @@
              qwenGroup.style.display = 'none';
              minimaxGroup.style.display = 'none';
              minimaxCnGroup.style.display = 'none';
+             lmStudioGroup.style.display = 'none';
 
              // Show the selected provider's group
              if (provider === 'openai') {
@@ -1829,19 +1844,21 @@
                  minimaxGroup.style.display = 'block';
              } else if (provider === 'minimax_cn') {
                  minimaxCnGroup.style.display = 'block';
+             } else if (provider === 'lm_studio') {
+                 lmStudioGroup.style.display = 'block';
              }
-             
+
              // Update provider on backend
              updateProvider(provider);
-             
+
              // Check API key status for the selected provider
              checkApiKeyStatus();
          }
-         
+
          function updateProvider(provider) {
              // Save provider preference
              localStorage.setItem('quantagent_provider', provider);
-             
+
              fetch('/api/update-provider', {
                  method: 'POST',
                  headers: {
@@ -1861,11 +1878,11 @@
                  console.error('Error updating provider:', error);
              });
          }
-         
+
          function updateApiKey(provider) {
              const providerSelect = document.getElementById('llmProviderSelect');
              const actualProvider = provider || providerSelect.value;
-             
+
              let apiKey;
              if (actualProvider === 'openai') {
                  apiKey = document.getElementById('openaiApiKeyInput').value.trim();
@@ -1877,29 +1894,31 @@
                  apiKey = document.getElementById('minimaxApiKeyInput').value.trim();
              } else if (actualProvider === 'minimax_cn') {
                  apiKey = document.getElementById('minimaxCnApiKeyInput').value.trim();
+             } else if (actualProvider === 'lm_studio') {
+                 apiKey = document.getElementById('lmStudioApiKeyInput').value.trim();
              }
-             
+
              if (!apiKey) {
                  showApiKeyError('Please enter an API key');
                  return;
              }
-             
+
              // Hide previous messages
              hideApiKeyMessages();
-             
+
              // Show loading state
              const updateBtn = event.target.closest('button');
              const originalText = updateBtn.innerHTML;
              updateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';
              updateBtn.disabled = true;
-             
+
              // Make API call to update the key
              fetch('/api/update-api-key', {
                  method: 'POST',
                  headers: {
                      'Content-Type': 'application/json',
                  },
-                 body: JSON.stringify({ 
+                 body: JSON.stringify({
                      api_key: apiKey,
                      provider: actualProvider
                  })
@@ -1912,7 +1931,8 @@
                          'anthropic': 'Anthropic',
                          'qwen': 'Qwen',
                          'minimax': 'MiniMax',
-                         'minimax_cn': 'MiniMax CN'
+                         'minimax_cn': 'MiniMax CN',
+                         'lm_studio': 'LM Studio'
                      };
                      showApiKeySuccess(`${providerNames[actualProvider] || actualProvider} API key updated successfully!`);
                      if (actualProvider === 'openai') {
@@ -1941,31 +1961,31 @@
                  updateBtn.disabled = false;
              });
          }
-         
+
          function showApiKeySuccess(message) {
              const successDiv = document.getElementById('apiKeySuccess');
              const successText = document.getElementById('apiKeySuccessText');
              successText.textContent = message;
              successDiv.style.display = 'block';
-             
+
              // Hide after 5 seconds
              setTimeout(() => {
                  successDiv.style.display = 'none';
              }, 5000);
          }
-         
+
          function showApiKeyError(message) {
              const errorDiv = document.getElementById('apiKeyError');
              const errorText = document.getElementById('apiKeyErrorText');
              errorText.textContent = message;
              errorDiv.style.display = 'block';
-             
+
              // Hide after 5 seconds
              setTimeout(() => {
                  errorDiv.style.display = 'none';
              }, 5000);
          }
-         
+
          function hideApiKeyMessages() {
              document.getElementById('apiKeyError').style.display = 'none';
              document.getElementById('apiKeySuccess').style.display = 'none';

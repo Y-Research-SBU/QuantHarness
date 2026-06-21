@@ -1093,6 +1093,7 @@
                                         <option value="qwen">Qwen</option>
                                         <option value="minimax">MiniMax</option>
                                         <option value="minimax_cn">MiniMax CN</option>
+                                        <option value="gemini">Google Gemini (Free)</option>
                                     </select>
                                 </div>
                                 
@@ -1146,6 +1147,17 @@
                                     <div class="input-group">
                                         <input type="password" class="form-control" id="minimaxCnApiKeyInput" placeholder="Enter your MiniMax CN API key">
                                         <button class="btn btn-outline-primary" type="button" onclick="updateApiKey('minimax_cn')">
+                                            <i class="fas fa-save"></i> Update
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Google Gemini API Key Input -->
+                                <div class="form-group" id="geminiApiKeyGroup" style="display: none;">
+                                    <label class="form-label">Google Gemini API Key (Free - ai.google.dev)</label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control" id="geminiApiKeyInput" placeholder="Enter your Google Gemini API key">
+                                        <button class="btn btn-outline-primary" type="button" onclick="updateApiKey('gemini')">
                                             <i class="fas fa-save"></i> Update
                                         </button>
                                     </div>
@@ -1521,7 +1533,8 @@
                         'anthropic': 'Anthropic',
                         'qwen': 'Qwen',
                         'minimax': 'MiniMax',
-                        'minimax_cn': 'MiniMax CN'
+                        'minimax_cn': 'MiniMax CN',
+                        'gemini': 'Google Gemini'
                     };
                     const providerName = providerNames[provider] || provider;
                     
@@ -1810,6 +1823,7 @@
              const qwenGroup = document.getElementById('qwenApiKeyGroup');
              const minimaxGroup = document.getElementById('minimaxApiKeyGroup');
              const minimaxCnGroup = document.getElementById('minimaxCnApiKeyGroup');
+             const geminiGroup = document.getElementById('geminiApiKeyGroup');
 
              // Hide all groups first
              openaiGroup.style.display = 'none';
@@ -1817,6 +1831,7 @@
              qwenGroup.style.display = 'none';
              minimaxGroup.style.display = 'none';
              minimaxCnGroup.style.display = 'none';
+             geminiGroup.style.display = 'none';
 
              // Show the selected provider's group
              if (provider === 'openai') {
@@ -1829,6 +1844,8 @@
                  minimaxGroup.style.display = 'block';
              } else if (provider === 'minimax_cn') {
                  minimaxCnGroup.style.display = 'block';
+             } else if (provider === 'gemini') {
+                 geminiGroup.style.display = 'block';
              }
              
              // Update provider on backend
@@ -1877,6 +1894,8 @@
                  apiKey = document.getElementById('minimaxApiKeyInput').value.trim();
              } else if (actualProvider === 'minimax_cn') {
                  apiKey = document.getElementById('minimaxCnApiKeyInput').value.trim();
+             } else if (actualProvider === 'gemini') {
+                 apiKey = document.getElementById('geminiApiKeyInput').value.trim();
              }
              
              if (!apiKey) {
@@ -1925,6 +1944,8 @@
                          document.getElementById('minimaxApiKeyInput').value = '';
                      } else if (actualProvider === 'minimax_cn') {
                          document.getElementById('minimaxCnApiKeyInput').value = '';
+                     } else if (actualProvider === 'gemini') {
+                         document.getElementById('geminiApiKeyInput').value = '';
                      }
                      checkApiKeyStatus();
                  } else {

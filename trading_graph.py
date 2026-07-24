@@ -17,7 +17,7 @@ from graph_setup import SetGraph
 from graph_util import TechnicalTools
 
 
-SUPPORTED_PROVIDERS = ("openai", "anthropic", "qwen", "minimax", "minimax_cn")
+SUPPORTED_PROVIDERS = ("openai", "anthropic", "qwen", "minimax", "minimax_cn", "gemini")
 MINIMAX_PROVIDER_CONFIG = {
     "minimax": {
         "label": "MiniMax",
@@ -178,9 +178,28 @@ class TradingGraph:
                     f"Please provide your actual {provider_config['label']} API key. "
                     f"You can get one from: {provider_config['console_url']}"
                 )
+        elif provider == "gemini":
+            api_key = self.config.get("gemini_api_key")
+
+            if not api_key:
+                api_key = os.environ.get("GOOGLE_API_KEY")
+
+            if not api_key:
+                raise ValueError(
+                    "Google Gemini API key not found. Please set it using one of these methods:\n"
+                    "1. Set environment variable: export GOOGLE_API_KEY='your-key-here'\n"
+                    "2. Update the config with: config['gemini_api_key'] = 'your-key-here'\n"
+                    "3. Use the web interface to update the API key"
+                )
+
+            if api_key == "":
+                raise ValueError(
+                    "Please provide your actual Google Gemini API key. "
+                    "You can get one from: https://ai.google.dev/"
+                )
         else:
             raise ValueError(f"Unsupported provider: {provider}. Must be one of {', '.join(SUPPORTED_PROVIDERS)}")
-        
+
         return api_key
 
     def _create_llm(
@@ -230,6 +249,13 @@ class TradingGraph:
                 temperature=clamped_temp,
                 api_key=api_key,
                 openai_api_base=MINIMAX_PROVIDER_CONFIG[provider]["base_url"],
+            )
+        elif provider == "gemini":
+            return ChatOpenAI(
+                model=model,
+                temperature=temperature,
+                api_key=api_key,
+                openai_api_base="https://generativelanguage.googleapis.com/v1beta/openai/",
             )
         else:
             raise ValueError(f"Unsupported provider: {provider}. Must be one of {', '.join(SUPPORTED_PROVIDERS)}")
@@ -323,6 +349,9 @@ class TradingGraph:
 
             # Keep CN credentials separate from the global MiniMax key.
             os.environ["MINIMAX_CN_API_KEY"] = api_key
+        elif provider == "gemini":
+            self.config["gemini_api_key"] = api_key
+            os.environ["GOOGLE_API_KEY"] = api_key
         else:
             raise ValueError(f"Unsupported provider: {provider}. Must be one of {', '.join(SUPPORTED_PROVIDERS)}")
         

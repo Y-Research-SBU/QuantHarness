@@ -41,12 +41,6 @@
   <a href="https://Y-Research-SBU.github.io/QuantHarness">
     <img src="https://img.shields.io/badge/Project-Website-blue?style=flat-square&logo=googlechrome" alt="Project Website">
   </a>
-  <a href="https://github.com/Y-Research-SBU/QuantHarness/blob/main/assets/wechat_0203.jpg">
-    <img src="https://img.shields.io/badge/WeChat-Group-green?style=flat-square&logo=wechat" alt="WeChat Group">
-  </a>
-  <a href="https://discord.gg/t9nQ6VXQ">
-    <img src="https://img.shields.io/badge/Discord-Community-5865F2?style=flat-square&logo=discord" alt="Discord Community">
-  </a>
 </p>
 
 </div>

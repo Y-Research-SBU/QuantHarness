@@ -234,7 +234,7 @@ python web_interface.py
 
 ## 📺 演示
 
-![快速预览](assets/demo_v2.gif)
+![快速预览](assets/demo.gif)
 
 ## 🤝 贡献
 

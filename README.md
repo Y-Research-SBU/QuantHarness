@@ -160,7 +160,7 @@ The web application will be available at `http://127.0.0.1:5000`
 
 ## 📺 Demo
 
-![Quick preview](assets/demo.gif)
+![Quick preview](assets/demo_v2.gif)
 
 
 ## 🔧 Implementation Details

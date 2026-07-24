@@ -1,4 +1,4 @@
-"""Integration tests for MiniMax provider in QuantAgent.
+"""Integration tests for MiniMax provider in QuantHarness.
 
 These tests verify end-to-end behavior with the actual MiniMax API.
 They require the MINIMAX_API_KEY environment variable to be set.

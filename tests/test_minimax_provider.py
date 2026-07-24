@@ -1,4 +1,4 @@
-"""Unit tests for MiniMax provider integration in QuantAgent."""
+"""Unit tests for MiniMax provider integration in QuantHarness."""
 
 import os
 import sys

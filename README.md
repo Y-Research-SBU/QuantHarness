@@ -1,7 +1,7 @@
 <div align="center">
 
-![QuantAgent Banner](assets/banner.png)
-<h2>QuantAgent: Price-Driven Multi-Agent LLMs for High-Frequency Trading</h2>
+![QuantHarness Banner](assets/banner.png)
+<h2>QuantHarness: Price-Driven Multi-Agent LLMs for High-Frequency Trading</h2>
 
 </div>
 
@@ -38,10 +38,10 @@
   <a href="https://arxiv.org/abs/2509.09995">
     <img src="https://img.shields.io/badge/💡%20ArXiv-2509.09995-B31B1B?style=flat-square" alt="Paper">
   </a>
-  <a href="https://Y-Research-SBU.github.io/QuantAgent">
+  <a href="https://Y-Research-SBU.github.io/QuantHarness">
     <img src="https://img.shields.io/badge/Project-Website-blue?style=flat-square&logo=googlechrome" alt="Project Website">
   </a>
-  <a href="https://github.com/Y-Research-SBU/QuantAgent/blob/main/assets/wechat_0203.jpg">
+  <a href="https://github.com/Y-Research-SBU/QuantHarness/blob/main/assets/wechat_0203.jpg">
     <img src="https://img.shields.io/badge/WeChat-Group-green?style=flat-square&logo=wechat" alt="WeChat Group">
   </a>
   <a href="https://discord.gg/t9nQ6VXQ">
@@ -102,8 +102,8 @@ Modern Flask-based web application with:
 ### 1. Create and Activate Conda Environment
 
 ```bash
-conda create -n quantagents python=3.11
-conda activate quantagents
+conda create -n quantharness python=3.11
+conda activate quantharness
 ```
 
 ### 2. Install Dependencies
@@ -176,7 +176,7 @@ The web application will be available at `http://127.0.0.1:5000`
 
 ### Python Usage
 
-To use QuantAgents inside your code, you can import the trading_graph module and initialize a TradingGraph() object. The .invoke() function will return a comprehensive analysis. You can run web_interface.py, here's also a quick example:
+To use QuantHarness inside your code, you can import the trading_graph module and initialize a TradingGraph() object. The .invoke() function will return a comprehensive analysis. You can run web_interface.py, here's also a quick example:
 
 ```python
 from trading_graph import TradingGraph
@@ -265,8 +265,8 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🔖 Citation
 ```
-@article{xiong2025quantagent,
-  title={QuantAgent: Price-Driven Multi-Agent LLMs for High-Frequency Trading},
+@article{xiong2025quantharness,
+  title={QuantHarness: Price-Driven Multi-Agent LLMs for High-Frequency Trading},
   author={Fei Xiong and Xiang Zhang and Aosong Feng and Siqi Sun and Chenyu You},
   journal={arXiv preprint arXiv:2509.09995},
   year={2025}
@@ -322,4 +322,4 @@ For questions, feedback, or collaboration opportunities, please contact:
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Y-Research-SBU/QuantAgent&type=Date)](https://www.star-history.com/#Y-Research-SBU/QuantAgent&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=Y-Research-SBU/QuantHarness&type=Date)](https://www.star-history.com/#Y-Research-SBU/QuantHarness&Date)

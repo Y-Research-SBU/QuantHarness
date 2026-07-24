@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="utf-8">
-    <title>QuantAgent - Multi-Agent Trading System</title>
+    <title>QuantHarness - Multi-Agent Trading System</title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -890,8 +890,8 @@
                                         
                                     </div>
                                     <div style="display: flex; align-items: center; justify-content: center; gap: 0rem; margin-bottom: 0.5rem;">
-                                        <img src="assets/darklogo.png" alt="QuantAgent Logo" style="width: 7rem; height: 7rem; object-fit: contain; background: transparent; box-shadow: none; border: none; border-radius: 0; transform: translateY(0.5rem);">
-                                        <span style="font-size: 4.0rem; font-weight: 700; color: white; line-height: 1.0;">QuantAgent:</span>
+                                        <img src="assets/darklogo.png" alt="QuantHarness Logo" style="width: 7rem; height: 7rem; object-fit: contain; background: transparent; box-shadow: none; border: none; border-radius: 0; transform: translateY(0.5rem);">
+                                        <span style="font-size: 4.0rem; font-weight: 700; color: white; line-height: 1.0;">QuantHarness:</span>
                                     </div>
                                     <div class="text-center">
                                         <span class="title-highlight">Multi-Agent Trading System</span>
@@ -915,7 +915,7 @@
                         
                             <!-- Parent container with relative positioning -->
                 <!-- <div class="w-full md:w-[500px] mt-10 md:mt-0 md:ml-10 flex-shrink-0">
-                        <img src="assets/banner.png" alt="QuantAgent Banner" class="w-full h-auto rounded-lg shadow-xl" />
+                        <img src="assets/banner.png" alt="QuantHarness Banner" class="w-full h-auto rounded-lg shadow-xl" />
                     </div> -->
 
                         
@@ -1221,9 +1221,9 @@
         
         // Persisted state keys
         const STORAGE_KEYS = {
-            CUSTOM_ASSETS: 'quantagent_custom_assets',
-            SELECTED_ASSET: 'quantagent_selected_asset',
-            SELECTED_TIMEFRAME: 'quantagent_selected_timeframe'
+            CUSTOM_ASSETS: 'quantharness_custom_assets',
+            SELECTED_ASSET: 'quantharness_selected_asset',
+            SELECTED_TIMEFRAME: 'quantharness_selected_timeframe'
         };
 
         // Add or render a custom asset button into the grid
@@ -1499,7 +1499,7 @@
             checkApiKeyStatus();
             
             // Set initial provider dropdown state
-            const savedProvider = localStorage.getItem('quantagent_provider') || 'openai';
+            const savedProvider = localStorage.getItem('quantharness_provider') || 'openai';
             if (savedProvider) {
                 document.getElementById('llmProviderSelect').value = savedProvider;
                 handleProviderChange();
@@ -1840,7 +1840,7 @@
          
          function updateProvider(provider) {
              // Save provider preference
-             localStorage.setItem('quantagent_provider', provider);
+             localStorage.setItem('quantharness_provider', provider);
              
              fetch('/api/update-provider', {
                  method: 'POST',

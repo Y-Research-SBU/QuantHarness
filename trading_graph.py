@@ -191,7 +191,7 @@ class TradingGraph:
 
         Args:
             provider: The provider name ("openai", "anthropic", "qwen", "minimax", or "minimax_cn")
-            model: The model name (e.g., "gpt-4o", "claude-3-5-sonnet-20241022", "qwen-vl-max-latest", "MiniMax-M2.7")
+            model: The model name (e.g., "gpt-4o", "claude-3-5-sonnet-20241022", "qwen-vl-max-latest", "MiniMax-M3")
             temperature: The temperature setting for the model
 
         Returns:

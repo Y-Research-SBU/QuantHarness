@@ -316,4 +316,4 @@ For questions, feedback, or collaboration opportunities, please contact:
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Y-Research-SBU/QuantHarness&type=Date)](https://www.star-history.com/#Y-Research-SBU/QuantHarness&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=Y-Research-SBU/QuantHarness&type=Date)](https://star-history.dera.page/#Y-Research-SBU/QuantHarness&Date)

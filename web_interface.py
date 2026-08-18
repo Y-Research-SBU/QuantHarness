@@ -16,13 +16,14 @@ from trading_graph import TradingGraph
 
 app = Flask(__name__)
 
-SUPPORTED_PROVIDERS = ("openai", "anthropic", "qwen", "minimax", "minimax_cn")
+SUPPORTED_PROVIDERS = ("openai", "anthropic", "qwen", "minimax", "minimax_cn", "gemini")
 PROVIDER_DISPLAY_NAMES = {
     "openai": "OpenAI",
     "anthropic": "Anthropic",
     "qwen": "Qwen",
     "minimax": "MiniMax",
     "minimax_cn": "MiniMax CN",
+    "gemini": "Google Gemini",
 }
 MINIMAX_PROVIDER_CONFIG = {
     "minimax": {
@@ -60,10 +61,15 @@ def apply_provider_defaults(config: Dict[str, Any], provider: str) -> None:
         minimax_model = MINIMAX_PROVIDER_CONFIG[provider]["default_model"]
         config["agent_llm_model"] = minimax_model
         config["graph_llm_model"] = minimax_model
+    elif provider == "gemini":
+        if not config["agent_llm_model"].startswith("gemini"):
+            config["agent_llm_model"] = "gemini-2.5-flash"
+        if not config["graph_llm_model"].startswith("gemini"):
+            config["graph_llm_model"] = "gemini-2.5-flash"
     elif provider == "openai":
-        if config["agent_llm_model"].startswith(("claude", "qwen", "MiniMax")):
+        if config["agent_llm_model"].startswith(("claude", "qwen", "MiniMax", "gemini")):
             config["agent_llm_model"] = "gpt-4o-mini"
-        if config["graph_llm_model"].startswith(("claude", "qwen", "MiniMax")):
+        if config["graph_llm_model"].startswith(("claude", "qwen", "MiniMax", "gemini")):
             config["graph_llm_model"] = "gpt-4o"
 
 
@@ -108,6 +114,8 @@ class WebTradingAnalyzer:
             "SPX": "^GSPC",  # S&P 500
             "BTC": "BTC-USD",  # Bitcoin
             "GC": "GC=F",  # Gold Futures
+            "XAUUSD": "GC=F",  # Gold (alias)
+            "xauusd": "GC=F",  # Gold (alias)
             "NQ": "NQ=F",  # Nasdaq Futures
             "CL": "CL=F",  # Crude Oil
             "ES": "ES=F",  # E-mini S&P 500
@@ -618,6 +626,23 @@ class WebTradingAnalyzer:
                 )
 
                 provider_name = PROVIDER_DISPLAY_NAMES[provider]
+            elif provider == "gemini":
+                from openai import OpenAI as _OpenAI
+                api_key = os.environ.get("GOOGLE_API_KEY") or self.config.get("gemini_api_key", "")
+                if not api_key:
+                    return {
+                        "valid": False,
+                        "error": "❌ Invalid API Key: The Google Gemini API key is not set. Please update it in the Settings section.",
+                    }
+
+                client = _OpenAI(api_key=api_key, base_url="https://generativelanguage.googleapis.com/v1beta/openai/")
+                _ = client.chat.completions.create(
+                    model="gemini-2.5-flash",
+                    messages=[{"role": "user", "content": "Hello"}],
+                    max_tokens=5,
+                )
+
+                provider_name = "Google Gemini"
             else:
                 return {"valid": False, "error": f"Unsupported provider: {provider}"}
             return {"valid": True, "message": f"{provider_name} API key is valid"}
@@ -1004,6 +1029,8 @@ def update_api_key():
             os.environ["MINIMAX_API_KEY"] = new_api_key
         elif provider == "minimax_cn":
             os.environ["MINIMAX_CN_API_KEY"] = new_api_key
+        elif provider == "gemini":
+            os.environ["GOOGLE_API_KEY"] = new_api_key
 
         set_active_provider(provider)
 
@@ -1018,6 +1045,8 @@ def update_api_key():
             analyzer.config["minimax_api_key"] = new_api_key
         elif provider == "minimax_cn":
             analyzer.config["minimax_cn_api_key"] = new_api_key
+        elif provider == "gemini":
+            analyzer.config["gemini_api_key"] = new_api_key
 
         analyzer.trading_graph.config.update(analyzer.config)
 
@@ -1067,6 +1096,10 @@ def get_api_key_status():
                 api_key = os.environ.get("MINIMAX_CN_API_KEY", "")
             if not api_key:
                 api_key = os.environ.get("MINIMAX_API_KEY", "")
+        elif provider == "gemini":
+            api_key = os.environ.get("GOOGLE_API_KEY", "")
+            if not api_key and hasattr(analyzer, 'config'):
+                api_key = analyzer.config.get("gemini_api_key", "")
         else:
             api_key = ""
         
@@ -1139,4 +1172,4 @@ if __name__ == "__main__":
     static_dir = Path("static")
     static_dir.mkdir(exist_ok=True)
 
-    app.run(debug=True, host="127.0.0.1", port=5000)
+    app.run(debug=False, host="127.0.0.1", port=5000)

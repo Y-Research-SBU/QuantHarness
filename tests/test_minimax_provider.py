@@ -383,8 +383,8 @@ class TestWebInterfaceProviderUpdate(unittest.TestCase):
         )
         data = resp.get_json()
         self.assertTrue(data.get("success"))
-        self.assertEqual(analyzer.config["agent_llm_model"], "MiniMax-M2.7")
-        self.assertEqual(analyzer.config["graph_llm_model"], "MiniMax-M2.7")
+        self.assertEqual(analyzer.config["agent_llm_model"], "MiniMax-M3")
+        self.assertEqual(analyzer.config["graph_llm_model"], "MiniMax-M3")
 
     @patch("web_interface.TradingGraph")
     def test_update_provider_minimax_cn(self, mock_tg_class):
@@ -406,8 +406,8 @@ class TestWebInterfaceProviderUpdate(unittest.TestCase):
         )
         data = resp.get_json()
         self.assertTrue(data.get("success"))
-        self.assertEqual(analyzer.config["agent_llm_model"], "MiniMax-M2.7")
-        self.assertEqual(analyzer.config["graph_llm_model"], "MiniMax-M2.7")
+        self.assertEqual(analyzer.config["agent_llm_model"], "MiniMax-M3")
+        self.assertEqual(analyzer.config["graph_llm_model"], "MiniMax-M3")
 
     @patch("web_interface.TradingGraph")
     def test_update_provider_invalid(self, mock_tg_class):
@@ -478,8 +478,8 @@ class TestWebInterfaceProviderUpdate(unittest.TestCase):
         self.assertEqual(os.environ.get("MINIMAX_CN_API_KEY"), "test-mm-cn-key")
         self.assertEqual(analyzer.config["agent_llm_provider"], "minimax_cn")
         self.assertEqual(analyzer.config["graph_llm_provider"], "minimax_cn")
-        self.assertEqual(analyzer.config["agent_llm_model"], "MiniMax-M2.7")
-        self.assertEqual(analyzer.config["graph_llm_model"], "MiniMax-M2.7")
+        self.assertEqual(analyzer.config["agent_llm_model"], "MiniMax-M3")
+        self.assertEqual(analyzer.config["graph_llm_model"], "MiniMax-M3")
         self.assertEqual(mock_tg.config["agent_llm_provider"], "minimax_cn")
 
     @patch("web_interface.TradingGraph")

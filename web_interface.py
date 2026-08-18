@@ -32,7 +32,7 @@ MINIMAX_PROVIDER_CONFIG = {
         "fallback_env_keys": (),
         "base_url": "https://api.minimax.io/v1",
         "validation_model": "MiniMax-M2.7-highspeed",
-        "default_model": "MiniMax-M2.7",
+        "default_model": "MiniMax-M3",
     },
     "minimax_cn": {
         "config_key": "minimax_cn_api_key",
@@ -40,7 +40,7 @@ MINIMAX_PROVIDER_CONFIG = {
         "fallback_env_keys": ("MINIMAX_API_KEY",),
         "base_url": "https://api.minimaxi.com/v1",
         "validation_model": "MiniMax-M2.7",
-        "default_model": "MiniMax-M2.7",
+        "default_model": "MiniMax-M3",
     },
 }
 

@@ -217,9 +217,9 @@ elif provider == "qwen":
 elif provider == "minimax":
     # Set default MiniMax models (204K context window)
     if not analyzer.config["agent_llm_model"].startswith("MiniMax"):
-        analyzer.config["agent_llm_model"] = "MiniMax-M2.7"
+        analyzer.config["agent_llm_model"] = "MiniMax-M3"
     if not analyzer.config["graph_llm_model"].startswith("MiniMax"):
-        analyzer.config["graph_llm_model"] = "MiniMax-M2.7"
+        analyzer.config["graph_llm_model"] = "MiniMax-M3"
 
 else:
     # Set default OpenAI models if not already set to OpenAI models

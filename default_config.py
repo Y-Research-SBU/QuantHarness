@@ -10,4 +10,5 @@ DEFAULT_CONFIG = {
     "qwen_api_key": "sk-",  # Qwen API key (optional, can also use DASHSCOPE_API_KEY env var)
     "minimax_api_key": "",  # MiniMax API key (optional, can also use MINIMAX_API_KEY env var)
     "minimax_cn_api_key": "",  # MiniMax CN API key (optional, can also use MINIMAX_CN_API_KEY or MINIMAX_API_KEY env var)
+    "cheaperinference_api_key": "",  # Cheaper Inference API key (optional, can also use CHEAPER_INFERENCE_API_KEY env var)
 }

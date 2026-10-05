@@ -1094,6 +1094,7 @@
                                         <option value="minimax">MiniMax</option>
                                         <option value="minimax_cn">MiniMax CN</option>
                                         <option value="gemini">Google Gemini (Free)</option>
+                                        <option value="cheaperinference">Cheaper Inference</option>
                                     </select>
                                 </div>
                                 
@@ -1158,6 +1159,17 @@
                                     <div class="input-group">
                                         <input type="password" class="form-control" id="geminiApiKeyInput" placeholder="Enter your Google Gemini API key">
                                         <button class="btn btn-outline-primary" type="button" onclick="updateApiKey('gemini')">
+                                            <i class="fas fa-save"></i> Update
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Cheaper Inference API Key Input -->
+                                <div class="form-group" id="cheaperinferenceApiKeyGroup" style="display: none;">
+                                    <label class="form-label">Cheaper Inference API Key (cheaperinference.com)</label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control" id="cheaperinferenceApiKeyInput" placeholder="Enter your Cheaper Inference API key">
+                                        <button class="btn btn-outline-primary" type="button" onclick="updateApiKey('cheaperinference')">
                                             <i class="fas fa-save"></i> Update
                                         </button>
                                     </div>
@@ -1534,7 +1546,8 @@
                         'qwen': 'Qwen',
                         'minimax': 'MiniMax',
                         'minimax_cn': 'MiniMax CN',
-                        'gemini': 'Google Gemini'
+                        'gemini': 'Google Gemini',
+                        'cheaperinference': 'Cheaper Inference'
                     };
                     const providerName = providerNames[provider] || provider;
                     
@@ -1824,6 +1837,7 @@
              const minimaxGroup = document.getElementById('minimaxApiKeyGroup');
              const minimaxCnGroup = document.getElementById('minimaxCnApiKeyGroup');
              const geminiGroup = document.getElementById('geminiApiKeyGroup');
+             const cheaperinferenceGroup = document.getElementById('cheaperinferenceApiKeyGroup');
 
              // Hide all groups first
              openaiGroup.style.display = 'none';
@@ -1832,6 +1846,7 @@
              minimaxGroup.style.display = 'none';
              minimaxCnGroup.style.display = 'none';
              geminiGroup.style.display = 'none';
+             cheaperinferenceGroup.style.display = 'none';
 
              // Show the selected provider's group
              if (provider === 'openai') {
@@ -1846,6 +1861,8 @@
                  minimaxCnGroup.style.display = 'block';
              } else if (provider === 'gemini') {
                  geminiGroup.style.display = 'block';
+             } else if (provider === 'cheaperinference') {
+                 cheaperinferenceGroup.style.display = 'block';
              }
              
              // Update provider on backend
@@ -1896,6 +1913,8 @@
                  apiKey = document.getElementById('minimaxCnApiKeyInput').value.trim();
              } else if (actualProvider === 'gemini') {
                  apiKey = document.getElementById('geminiApiKeyInput').value.trim();
+             } else if (actualProvider === 'cheaperinference') {
+                 apiKey = document.getElementById('cheaperinferenceApiKeyInput').value.trim();
              }
              
              if (!apiKey) {
@@ -1946,6 +1965,8 @@
                          document.getElementById('minimaxCnApiKeyInput').value = '';
                      } else if (actualProvider === 'gemini') {
                          document.getElementById('geminiApiKeyInput').value = '';
+                     } else if (actualProvider === 'cheaperinference') {
+                         document.getElementById('cheaperinferenceApiKeyInput').value = '';
                      }
                      checkApiKeyStatus();
                  } else {

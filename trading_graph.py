@@ -17,7 +17,7 @@ from graph_setup import SetGraph
 from graph_util import TechnicalTools
 
 
-SUPPORTED_PROVIDERS = ("openai", "anthropic", "qwen", "minimax", "minimax_cn", "gemini")
+SUPPORTED_PROVIDERS = ("openai", "anthropic", "qwen", "minimax", "minimax_cn", "gemini", "cheaperinference")
 MINIMAX_PROVIDER_CONFIG = {
     "minimax": {
         "label": "MiniMax",
@@ -197,6 +197,19 @@ class TradingGraph:
                     "Please provide your actual Google Gemini API key. "
                     "You can get one from: https://ai.google.dev/"
                 )
+        elif provider == "cheaperinference":
+            api_key = self.config.get("cheaperinference_api_key")
+
+            if not api_key:
+                api_key = os.environ.get("CHEAPER_INFERENCE_API_KEY")
+
+            if not api_key:
+                raise ValueError(
+                    "Cheaper Inference API key not found. Please set it using one of these methods:\n"
+                    "1. Set environment variable: export CHEAPER_INFERENCE_API_KEY='your-key-here'\n"
+                    "2. Update the config with: config['cheaperinference_api_key'] = 'your-key-here'\n"
+                    "3. Use the web interface to update the API key"
+                )
         else:
             raise ValueError(f"Unsupported provider: {provider}. Must be one of {', '.join(SUPPORTED_PROVIDERS)}")
 
@@ -256,6 +269,13 @@ class TradingGraph:
                 temperature=temperature,
                 api_key=api_key,
                 openai_api_base="https://generativelanguage.googleapis.com/v1beta/openai/",
+            )
+        elif provider == "cheaperinference":
+            return ChatOpenAI(
+                model=model,
+                temperature=temperature,
+                api_key=api_key,
+                openai_api_base="https://api.cheaperinference.com/v1",
             )
         else:
             raise ValueError(f"Unsupported provider: {provider}. Must be one of {', '.join(SUPPORTED_PROVIDERS)}")
@@ -352,6 +372,9 @@ class TradingGraph:
         elif provider == "gemini":
             self.config["gemini_api_key"] = api_key
             os.environ["GOOGLE_API_KEY"] = api_key
+        elif provider == "cheaperinference":
+            self.config["cheaperinference_api_key"] = api_key
+            os.environ["CHEAPER_INFERENCE_API_KEY"] = api_key
         else:
             raise ValueError(f"Unsupported provider: {provider}. Must be one of {', '.join(SUPPORTED_PROVIDERS)}")
         

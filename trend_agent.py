@@ -156,7 +156,8 @@ def create_trend_agent(tool_llm, graph_llm, toolkit):
 
         return {
             "messages": messages + [final_response],
-            "trend_report": final_response.content,
+            # "trend_report": final_response.content,
+            "trend_report": str(final_response.content),
             "trend_image": trend_image_b64,
             "trend_image_filename": "trend_graph.png",
             "trend_image_description": (

@@ -1,0 +1,105 @@
+\usepackage{tikz}
+\usepackage{tikzsymbols}
+\usepackage{pgfpages}
+
+\usetikzlibrary{positioning}
+\usetikzlibrary{fit}
+
+% --- my commands ---
+\newcommand{\withja}[2]{%
+#1\vspace{-0.5em}\\\scriptsize{#2}%
+}
+
+\newcommand<>{\highlight}[2][red]{%
+    \alt#3{%
+        \tikz[baseline=(x.base)]{
+            \node[rectangle,rounded corners,fill=#1!10](x){$#2$};
+        }%
+    }{%
+        #2
+    }%
+}
+
+\newcommand<>{\highlightcap}[3][red]{%
+    \alt#4{%
+        \tikz[baseline=(x.base)]{
+            \node[rectangle,rounded corners,fill=#1!10](x){$#2$};
+            \node[anchor=north, color=#1, align=center] at (x.south) {#3};
+        }%
+    }{%
+        #2
+    }%
+}
+
+\newcommand<>{\highlightcapoverlay}[3][red]{%
+    \alt#4{%
+        \tikz[baseline=(x.base)]{
+            \node[rectangle,rounded corners,fill=#1!10](x){$#2$};
+            \node[anchor=north, color=#1, align=center, overlay] (y) at (x.south) {#3};
+            \node[anchor=north, color=#1, align=center, inner ysep=7.5pt, fit={(y.south) (y.north)}] at (x.south) {};
+        }%
+    }{%
+        #2
+    }%
+}
+
+\newcommand<>{\highlightcapheadoverlay}[3][red]{%
+    \alt#4{%
+        \tikz[baseline=(x.base)]{
+            \node[rectangle,rounded corners,fill=#1!10](x){$#2$};
+            \node[anchor=south, color=#1, align=center, overlay] (y) at (x.north) {#3};
+            \node[anchor=south, color=#1, align=center, inner ysep=7.5pt, fit={(y.south) (y.north)}] at (x.north) {};
+        }%
+    }{%
+        #2
+    }%
+}
+
+\newcommand<>{\highlightcaphead}[3][red]{%
+    \alt#4{%
+        \tikz[baseline=(x.base)]{
+            \node[rectangle,rounded corners,fill=#1!10](x){$#2$};
+            \node[anchor=south, color=#1, align=center] at (x.north) {#3};
+        }%
+    }{%
+        #2
+    }%
+}
+
+\newcommand<>{\highlightcapright}[3][red]{%
+    \alt#4{%
+        \tikz[baseline=(x.base)]{
+            \node[rectangle,rounded corners,fill=#1!10](x){$#2$};
+            \node[anchor=west, color=#1, align=center] at (x.east) {#3};
+        }%
+    }{%
+        #2
+    }%
+}
+
+\newcommand{\remarkbox}[2][gray]{%
+    \tikz[baseline=(x.base)]{
+        \node[rectangle,rounded corners,fill=#1!30] (x) {%
+            \begin{minipage}[c]{\hsize}%
+            #2%
+            \end{minipage}%
+        };
+    }%
+}
+
+\newenvironment{supframe}[1]{%
+    \setbeamercolor{frametitle}{fg=white!90!purple, bg=mLightGreen!75!black}%
+    \begin{frame}{#1}%
+}{%
+    \end{frame}%
+}
+
+\newcommand{\nbracket}[1]{\left( #1 \right)}
+\newcommand{\cbracket}[1]{\left\{ #1 \right\}}
+\newcommand{\rbracket}[1]{\left[ #1 \right]}
+\newcommand{\abracket}[1]{\left\langle #1 \right\rangle}
+
+\newcommand{\boldsf}[1]{\boldsymbol{\mathsf{#1}}}
+
+\DeclareMathOperator{\tr}{tr}
+\DeclareMathOperator*{\argmax}{argmax}

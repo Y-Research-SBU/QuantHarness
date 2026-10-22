@@ -63,9 +63,13 @@ def apply_provider_defaults(config: Dict[str, Any], provider: str) -> None:
         config["graph_llm_model"] = minimax_model
     elif provider == "gemini":
         if not config["agent_llm_model"].startswith("gemini"):
-            config["agent_llm_model"] = "gemini-2.5-flash"
+            # config["agent_llm_model"] = "gemini-2.5-flash"
+            # config["agent_llm_model"] = "gemini-3.8-flash"
+            config["agent_llm_model"] = "gemini-3.5-flash-lite"
         if not config["graph_llm_model"].startswith("gemini"):
-            config["graph_llm_model"] = "gemini-2.5-flash"
+            # config["graph_llm_model"] = "gemini-2.5-flash"
+            # config["graph_llm_model"] = "gemini-3.8-flash"
+            config["graph_llm_model"] = "gemini-3.5-flash-lite"
     elif provider == "openai":
         if config["agent_llm_model"].startswith(("claude", "qwen", "MiniMax", "gemini")):
             config["agent_llm_model"] = "gpt-4o-mini"
@@ -637,7 +641,9 @@ class WebTradingAnalyzer:
 
                 client = _OpenAI(api_key=api_key, base_url="https://generativelanguage.googleapis.com/v1beta/openai/")
                 _ = client.chat.completions.create(
-                    model="gemini-2.5-flash",
+                    # model="gemini-2.5-flash",
+                    # model="gemini-3.8-flash",
+                    model="gemini-3.5-flash-lite",
                     messages=[{"role": "user", "content": "Hello"}],
                     max_tokens=5,
                 )

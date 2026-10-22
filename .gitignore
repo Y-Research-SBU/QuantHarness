@@ -1,4 +1,4 @@
-__pycache__/
+*__pycache__/
 kline_chart.png
 trend_graph.png
 record.csv
@@ -8,3 +8,5 @@ pdf_content.txt
 read.html
 read_files/
 app/
+.env
+.DS_Store

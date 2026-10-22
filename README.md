@@ -1,319 +1,122 @@
-<div align="center">
+# QuantHarness — Reproduction & Experimental Analysis
 
-![QuantHarness Banner](assets/banner.png)
-<h2>QuantHarness: Price-Driven Multi-Agent LLMs for High-Frequency Trading</h2>
+This repository contains a review of the paper [QuantHarness: Price-Driven Multi-Agent LLMs for High-Frequency Trading (Xiong et al., 2025)](https://arxiv.org/abs/2509.09995v4) with a reproduction and experimental analysis.
 
-</div>
+[Original implementation](https://github.com/Y-Research-SBU/QuantHarness); [original README](ORIGINAL_README.md).
 
+This project builds upon the original implementation by Y-Research @SBU, licensed under the MIT License.
+The original license and copyright notice are preserved in the [LICENSE](LICENSE) file.
 
+## Presentation
 
-<div align="center">
+The presentation of the paper review is available [here](reproduction/presentation/main.pdf).
 
-<div style="position: relative; text-align: center; margin: 20px 0;">
-  <div style="position: absolute; top: -10px; right: 20%; font-size: 1.2em;"></div>
-  <p>
-    <a href="https://machineily.github.io/">Fei Xiong</a><sup>1,2 ★</sup>&nbsp;
-    <a href="https://wyattz23.github.io">Xiang Zhang</a><sup>3 ★</sup>&nbsp;
-    <a href="https://scholar.google.com/citations?user=hFhhrmgAAAAJ&hl=en">Aosong Feng</a><sup>4</sup>&nbsp;
-    <a href="https://intersun.github.io/">Siqi Sun</a><sup>5</sup>&nbsp;
-    <a href="https://chenyuyou.me/">Chenyu You</a><sup>1</sup>
-  </p>
-  
-  <p>
-    <sup>1</sup> Stony Brook University &nbsp;&nbsp; 
-    <sup>2</sup> Carnegie Mellon University &nbsp;&nbsp;
-    <sup>3</sup> University of British Columbia &nbsp;&nbsp; <br>
-    <sup>4</sup> Yale University &nbsp;&nbsp; 
-    <sup>5</sup> Fudan University &nbsp;&nbsp; 
-    ★ Equal Contribution <br>
-  </p>
-</div>
+## Reproduction
 
-<div align="center" style="margin: 20px 0;">
-  <a href="README.md">English</a> | <a href="README_CN.md">中文</a>
-</div>
-
-<br>
-<p align="center">
-  <a href="https://arxiv.org/abs/2509.09995">
-    <img src="https://img.shields.io/badge/💡%20ArXiv-2509.09995-B31B1B?style=flat-square" alt="Paper">
-  </a>
-  <a href="https://Y-Research-SBU.github.io/QuantHarness">
-    <img src="https://img.shields.io/badge/Project-Website-blue?style=flat-square&logo=googlechrome" alt="Project Website">
-  </a>
-</p>
-
-</div>
-
-
-A sophisticated multi-agent trading analysis system that combines technical indicators, pattern recognition, and trend analysis using LangChain and LangGraph. The system provides both a web interface and programmatic access for comprehensive market analysis.
-
-
-<div align="center">
-
-🚀 [Features](#-features) | ⚡ [Installation](#-installation) | 🎬 [Usage](#-usage) | 🔧 [Implementation Details](#-implementation-details) | 🤝 [Contributing](#-contributing) | 📄 [License](#-license)
-
-</div>
-
-## 🚀 Features
-
-<!-- - **Multi-Agent Analysis**: Four specialized agents working together: -->
-  
-  ### Indicator Agent
-  
-  • Computes five technical indicators—including RSI to assess momentum extremes, MACD to quantify convergence–divergence dynamics, and the Stochastic Oscillator to measure closing prices against recent trading ranges—on each incoming K‑line, converting raw OHLC data into precise, signal-ready metrics.
-
-  ![indicator agent](assets/indicator.png)
-  
- ### Pattern Agent
-  
-  • Upon a pattern query, the Pattern Agent first uses the agent draws the recent price chart, spots its main highs, lows, and general up‑or‑down moves, compares that shape to a set of familiar patterns, and returns a short, plain‑language description of the best match.
-  
-  ![indicator agent](assets/pattern.png)
-  
-  ### Trend Agent
-  
-  • Leverages tool-generated annotated K‑line charts overlaid with fitted trend channels—upper and lower boundary lines tracing recent highs and lows—to quantify market direction, channel slope, and consolidation zones, then delivers a concise, professional summary of the prevailing trend.
-  
-  ![trend agent](assets/trend.png)
-
-  ### Decision Agent
-  
-  • Synthesizes outputs from the Indicator, Pattern, Trend, and Risk agents—including momentum metrics, detected chart formations, channel analysis, and risk–reward assessments—to formulate actionable trade directives, clearly specifying LONG or SHORT positions, recommended entry and exit points, stop‑loss thresholds, and concise rationale grounded in each agent’s findings.
-  
-  ![alt text](assets/decision.png)
-
-### Web Interface
-Modern Flask-based web application with:
-  - Real-time market data from Yahoo Finance
-  - Interactive asset selection (stocks, crypto, commodities, indices)
-  - Multiple timeframe analysis (1m to 1d)
-  - Dynamic chart generation
-  - API key management
-
-## 📦 Installation
-
-### 1. Create and Activate Conda Environment
+The libraries required for running the reproduction are listed in [reproduction-requirements.txt](reproduction-requirements.txt) and need Python 3.11 or newer. To install all libraries necessary for both the original code and my experiment, run:
 
 ```bash
-conda create -n quantharness python=3.11
-conda activate quantharness
+pip install -r reproduction-requirements.txt
 ```
 
-### 2. Install Dependencies
+The experiment can be rerun in [this notebook](reproduction/experiment/experiment.ipynb).
 
-```bash
-pip install -r requirements.txt
-```
+Since baseline models are not provided by the authors, I implemented them from scratch using the information given in the paper. There are a few things to note:
 
-If you encounter issues with TA-lib-python, 
-try
+1. For this reproduction I used the historical data from the paper (located [here](benchmark)), using the last 3 candles for evaluation. The original implementation (from the GitHub repo) is meant for real-time use, so it feeds the last 45 candles to the agents, which in my case would lead to leakage. Hence, I adapted the code instead of completely reusing the functions from [web_interface.py](web_interface.py).
 
-```bash
-conda install -c conda-forge ta-lib
-```
+2. The paper says that 97 candles were used as the model's input and the last 3 for evaluation. It is not stated whether all 97 are used or a smaller window is applied. In the paper's repo the 45-candle window is used, so I decided to stick to the repository's version and used the 45 latest candles for model reasoning and the last 3 for evaluation.
 
-Or visit the [TA-Lib Python repository](https://github.com/ta-lib/ta-lib-python) for detailed installation instructions.
+3. For the Random approach I averaged the results across 100 seeds for fairness. The paper's Random result is close to my worst seed's 8-asset average, so it is unusually low: below 99 of the 100 seeds.
 
-### 3. Set Up LLM API Key
-You can set it in our Web InterFace Later,
+4. For XGBoost I used a chronological split instead of the random split (which is used in the paper) to avoid data leakage between the train and test sets. The "leaked" version performed significantly "better".
 
-![alt text](assets/apibox.png)
+5. Linear Regression fits the last 40 closes as the paper describes.
 
-Or set it as an environment variable:
-```bash
-# For OpenAI
-export OPENAI_API_KEY="your_openai_api_key_here"
+6. In my implementation QuantHarness ran on Gemini 3.5 / 3.1 Flash-Lite for 98.5% of segments. The repo's default model is OpenAI's gpt-4o, though it's not stated which exact model was used in the paper's experiment.
 
-# For Anthropic (Claude)
-export ANTHROPIC_API_KEY="your_anthropic_api_key_here"
+7. Returns ($R_{cc}$, $R_{max}$, $R_{min}$) are computed without stop-loss or take-profit caps. The [latest version](https://arxiv.org/abs/2509.09995v4) of the paper says each trade exits at a 0.05% stop-loss or at an $r$ × 0.05% take-profit, where $r$ is the risk-reward ratio between 1.2 and 1.8. That would keep every return between -0.05% and +0.09%. Yet Table 2 reports values such as 1.220% and -1.245% (BTC, Random), which match the uncapped formulas from the [earlier version](https://arxiv.org/abs/2509.09995v2) of the paper, so I used those. The repo does not implement a stop-loss or take-profit anywhere either.
 
-# For Qwen (DashScope, based in Singapore — delays may occur)
-export DASHSCOPE_API_KEY="your_dashscope_api_key_here"
+8. The 1h QQQ and SPX runs are not finished yet: 97/100 QQQ and 54/100 SPX segments have been evaluated so far.
 
-# For MiniMax (204K context, OpenAI-compatible API)
-export MINIMAX_API_KEY="your_minimax_api_key_here"
+### Main results
 
-```
+The obtained results are the following:
 
+![reproduction/presentation/figures/accuracy_vs_paper.png](reproduction/presentation/figures/accuracy_vs_paper.png)
 
+**4h directional accuracy (%)**: this reproduction, with the paper's Table 2 in brackets
 
+| Asset | Random | LR | XGBoost | QuantHarness | Always LONG |
+|---|---|---|---|---|---|
+| BTC | 50.2 (45.0) | 45.0 (46.0) | 60.0 (45.3) | 50.7 (50.7) | 55.7 |
+| CL | 50.3 (41.0) | 56.3 (54.3) | 50.0 (40.0) | 57.3 (55.0) | 49.0 |
+| DJI | 50.0 (47.0) | 53.0 (52.0) | 47.3 (47.3) | 48.0 (52.3) | 51.0 |
+| ES | 50.3 (51.0) | 48.7 (43.0) | 32.7 (52.0) | 54.3 (55.0) | 58.7 |
+| NQ | 49.3 (43.7) | 47.7 (48.7) | 38.0 (47.3) | 54.0 (55.3) | 58.3 |
+| QQQ | 49.9 (47.3) | 60.7 (56.0) | 39.3 (52.7) | 49.0 (59.7) | 60.0 |
+| SPX | 50.0 (47.3) | 59.0 (59.7) | 46.7 (60.0) | 58.3 (63.7) | 61.0 |
+| VIX | 49.0 (46.3) | 49.7 (48.7) | 54.0 (53.3) | 50.3 (54.7) | 52.7 |
+| **Mean** | **49.9** (46.1) | **52.5** (51.1) | **46.0** (49.7) | **52.8** (55.8) | **55.8** |
 
+**1h directional accuracy (%)**: this reproduction only, since the paper shows its 1h results as a chart (Fig. 5)
 
-## 🚀 Usage
+| Asset | Random | LR | XGBoost | QuantHarness | Always LONG |
+|---|---|---|---|---|---|
+| BTC | 50.4 | 49.3 | 43.3 | 46.0 | 50.0 |
+| CL | 49.5 | 43.7 | 52.0 | 49.0 | 46.3 |
+| DAX | 49.8 | 49.0 | 48.7 | 54.3 | 50.7 |
+| DJI | 49.2 | 52.7 | 48.7 | 56.0 | 54.3 |
+| ES | 49.5 | 54.3 | 44.7 | 51.7 | 53.0 |
+| NQ | 49.4 | 55.0 | 55.3 | 56.7 | 52.3 |
+| QQQ | 50.7 | 53.3 | 45.3 | 51.5\* | 55.0 |
+| SPX | 50.3 | 54.0 | 51.3 | 51.2\* | 54.3 |
+| **Mean** | **49.8** | **51.4** | **48.7** | **52.1** | **52.0** |
 
-### Start the Web Interface
+\* Still running: 97/100 QQQ and 54/100 SPX segments so far.
+ 
+Always LONG goes LONG on every segment. It is not in the paper, but it is the score a method has to beat to show any timing skill.
 
-```bash
-python web_interface.py
-```
+QuantHarness's 4h accuracy is within sampling noise of the paper's on 7 of 8 assets (joint p = 0.65). It does not beat LR on the same segments (+0.3 points, standard error 1.8), and it is below Always LONG.
 
-The web application will be available at `http://127.0.0.1:5000`
+### Returns
 
-### Web Interface Features
+![reproduction/presentation/figures/returns_vs_paper.png](reproduction/presentation/figures/returns_vs_paper.png)
 
-1. **Asset Selection**: Choose from available stocks, crypto, commodities, and indices
-2. **Timeframe Selection**: Analyze data from 1-minute to daily intervals
-3. **Date Range**: Select custom date ranges for analysis
-4. **Real-time Analysis**: Get comprehensive technical analysis with visualizations
-5. **API Key Management**: Update your OpenAI API key through the interface
+**4h returns (% per trade), mean over 7 assets with VIX left out**: this reproduction, with the paper's Table 2 in brackets
 
-## 📺 Demo
+| Method | $R_{cc}$ | $R_{max}$ | $R_{min}$ |
+|---|---|---|---|
+| Random | 0.00 (-0.10) | 0.90 (0.83) | -0.90 (-0.94) |
+| LR | 0.16 (0.10) | 1.00 (0.95) | -0.80 (-0.83) |
+| XGBoost | -0.09 (-0.01) | 0.97 (0.88) | -0.99 (-0.89) |
+| QuantHarness | 0.07 (0.17) | 0.94 (0.97) | -0.86 (-0.80) |
+| Always LONG | 0.06 | 0.90 | -0.90 |
 
-![Quick preview](assets/demo.gif)
+**4h $R_{cc}$ (% per trade) by asset**: this reproduction, with the paper's Table 2 in brackets
 
+| Asset | Random | LR | XGBoost | QuantHarness | Always LONG |
+|---|---|---|---|---|---|
+| BTC | 0.01 (-0.01) | -0.06 (-0.07) | 0.38 (-0.05) | 0.03 (0.09) | 0.26 |
+| CL | 0.02 (-0.37) | 0.12 (-0.11) | -0.19 (-0.06) | 0.10 (-0.01) | -0.31 |
+| DJI | 0.00 (0.05) | 0.16 (0.15) | -0.11 (-0.02) | 0.08 (0.16) | 0.10 |
+| ES | 0.00 (-0.05) | 0.14 (0.03) | -0.12 (-0.18) | 0.11 (0.18) | -0.01 |
+| NQ | -0.02 (-0.14) | 0.10 (0.15) | -0.31 (-0.01) | 0.12 (0.22) | 0.03 |
+| QQQ | -0.01 (-0.05) | 0.30 (0.18) | -0.14 (0.21) | -0.12 (0.21) | 0.26 |
+| SPX | 0.00 (-0.16) | 0.36 (0.38) | -0.13 (0.05) | 0.15 (0.34) | 0.11 |
+| VIX† | -0.09 (0.06) | 1.26 (-0.14) | -1.92 (0.16) | 1.68 (0.46) | 2.10 |
 
-## 🔧 Implementation Details
+† Not comparable: in the repo's data, VIX price ranges ($R_{max}$ - $R_{min}$) are about 1.8 times the paper's for every method, so its returns are on a different scale and are left out of the means.
 
+- All returns are uncapped and measured from the last visible close over the next 3 candles: $R_{cc}$ to the third close, $R_{max}$ to the best high (LONG) or low (SHORT), $R_{min}$ to the worst.
+- On the same segments, $R_{max} - R_{min}$ is the full price range, so it is the same for every method. $R_{max}$ and $R_{min}$ therefore mostly reflect volatility and rank methods the same way. XGBoost's values come from its 50 test files, which is another reason they differ.
 
-**Important Note**: Our model requires an LLM that can take images as input, as our agents generate and analyze visual charts for pattern recognition and trend analysis.
+QuantHarness earns 0.07% per trade against the paper's 0.17%. On the same segments it is level with Always LONG (+0.01 points, standard error 0.08) and below LR (-0.09, standard error 0.07). The paper reports the best $R_{cc}$ on 7 of 8 assets; in my experiment QuantHarness is best on 1 of 7 (NQ).
 
-### Python Usage
+## Suggested improvements
 
-To use QuantHarness inside your code, you can import the trading_graph module and initialize a TradingGraph() object. The .invoke() function will return a comprehensive analysis. You can run web_interface.py, here's also a quick example:
+The main limitation of QuantHarness is the insufficient justification for using LLMs in price-based trading. In text-based approaches the use of LLMs makes sense, whereas when the only input is numerical price data, there are cheaper and simpler methods, which the paper's approach does not seem to significantly outperform.
 
-```python
-from trading_graph import TradingGraph
+I suppose LLMs might be useful for researching, designing, or explaining trading strategies without necessarily being useful for making individual trading decisions. For example, an LLM could help formulate hypotheses, generate backtesting code, interpret diagnostic results, etc.
 
-# Initialize the trading graph
-trading_graph = TradingGraph()
-
-# Create initial state with your data
-initial_state = {
-    "kline_data": your_dataframe_dict,
-    "analysis_results": None,
-    "messages": [],
-    "time_frame": "4hour",
-    "stock_name": "BTC"
-}
-
-# Run the analysis
-final_state = trading_graph.graph.invoke(initial_state)
-
-# Access results
-print(final_state.get("final_trade_decision"))
-print(final_state.get("indicator_report"))
-print(final_state.get("pattern_report"))
-print(final_state.get("trend_report"))
-```
-
-You can also adjust the default configuration to set your own choice of LLMs or analysis parameters in web_interface.py.
-
-```python
-if provider == "anthropic":
-    # Set default Claude models if not already set to Anthropic models
-    if not analyzer.config["agent_llm_model"].startswith("claude"):
-        analyzer.config["agent_llm_model"] = "claude-haiku-4-5-20251001"
-    if not analyzer.config["graph_llm_model"].startswith("claude"):
-        analyzer.config["graph_llm_model"] = "claude-haiku-4-5-20251001"
-
-elif provider == "qwen":
-    # Set default Qwen models if not already set to Qwen models
-    if not analyzer.config["agent_llm_model"].startswith("qwen"):
-        analyzer.config["agent_llm_model"] = "qwen3-max"
-    if not analyzer.config["graph_llm_model"].startswith("qwen"):
-        analyzer.config["graph_llm_model"] = "qwen3-vl-plus"
-
-elif provider == "minimax":
-    # Set default MiniMax models (204K context window)
-    if not analyzer.config["agent_llm_model"].startswith("MiniMax"):
-        analyzer.config["agent_llm_model"] = "MiniMax-M3"
-    if not analyzer.config["graph_llm_model"].startswith("MiniMax"):
-        analyzer.config["graph_llm_model"] = "MiniMax-M3"
-
-else:
-    # Set default OpenAI models if not already set to OpenAI models
-    if analyzer.config["agent_llm_model"].startswith(("claude", "qwen", "MiniMax")):
-        analyzer.config["agent_llm_model"] = "gpt-4o-mini"
-    if analyzer.config["graph_llm_model"].startswith(("claude", "qwen", "MiniMax")):
-        analyzer.config["graph_llm_model"] = "gpt-4o"
-
-```
-
-For live data, we recommend using the web interface as it provides access to real-time market data through yfinance. The system automatically fetches the most recent 30 candlesticks for optimal LLM analysis accuracy.
-
-### Configuration Options
-
-The system supports the following configuration parameters:
-
-- `agent_llm_model`: Model for individual agents (default: "gpt-4o-mini")
-- `graph_llm_model`: Model for graph logic and decision making (default: "gpt-4o")
-- `agent_llm_temperature`: Temperature for agent responses (default: 0.1)
-- `graph_llm_temperature`: Temperature for graph logic (default: 0.1)
-
-**Note**: The system uses default token limits for comprehensive analysis. No artificial token restrictions are applied.
-
-You can view the full list of configurations in `default_config.py`.
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🔖 Citation
-```
-@article{xiong2025quantharness,
-  title={QuantHarness: Price-Driven Multi-Agent LLMs for High-Frequency Trading},
-  author={Fei Xiong and Xiang Zhang and Aosong Feng and Siqi Sun and Chenyu You},
-  journal={arXiv preprint arXiv:2509.09995},
-  year={2025}
-}
-```
-
-
-## 🙏 Acknowledgements
-
-This repository was built with the help of the following libraries and frameworks:
-
-- [**LangGraph**](https://github.com/langchain-ai/langgraph)
-- [**OpenAI**](https://github.com/openai/openai-python)
-- [**Anthropic (Claude)**](https://github.com/anthropics/anthropic-sdk-python)
-- [**Qwen**](https://github.com/QwenLM/Qwen)
-- [**MiniMax**](https://platform.minimaxi.com/) — 204K context, OpenAI-compatible API
-- [**yfinance**](https://github.com/ranaroussi/yfinance)
-- [**Flask**](https://github.com/pallets/flask)
-- [**TechnicalAnalysisAutomation**](https://github.com/neurotrader888/TechnicalAnalysisAutomation/tree/main)
-- [**tvdatafeed**](https://github.com/rongardF/tvdatafeed)
-## ⚠️ Disclaimer
-
-This software is for educational and research purposes only. It is not intended to provide financial advice. Always do your own research and consider consulting with a financial advisor before making investment decisions.
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-1. **TA-Lib Installation**: If you encounter TA-Lib installation issues, refer to the [official repository](https://github.com/ta-lib/ta-lib-python) for platform-specific instructions.
-
-2. **LLM API Key**: Ensure your API key is properly set in the environment or through the web interface.
-
-3. **Data Fetching**: The system uses Yahoo Finance for data. Some symbols might not be available or have limited historical data.
-
-4. **Memory Issues**: For large datasets, consider reducing the analysis window or using a smaller timeframe.
-
-### Support
-
-If you encounter any issues, please:
-
-0. Try refresh and re-enter LLM API key
-1. Check the troubleshooting section above
-2. Review the error messages in the console
-3. Ensure all dependencies are properly installed
-4. Verify your API key is valid and has sufficient credits
-
-## 📧 Contact
-
-For questions, feedback, or collaboration opportunities, please contact:
-
-**Email**: [chenyu.you@stonybrook.edu](mailto:chenyu.you@stonybrook.edu), [siqisun@fudan.edu.cn](mailto:siqisun@fudan.edu.cn)
-
-
-## Star History
-
-[![Star History Chart](https://star-history.dera.page/svg?repos=Y-Research-SBU/QuantHarness&type=Date)](https://star-history.dera.page/#Y-Research-SBU/QuantHarness&Date)
+In short, interpreting RSI, MACD, and candlestick shapes every hour may be an unnecessarily expensive and unreliable way to implement what could ultimately be a simple numerical decision rule.

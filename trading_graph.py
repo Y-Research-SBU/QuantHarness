@@ -11,13 +11,14 @@ from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 from langchain_qwq import ChatQwen
 from langgraph.prebuilt import ToolNode
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from default_config import DEFAULT_CONFIG
 from graph_setup import SetGraph
 from graph_util import TechnicalTools
 
 
-SUPPORTED_PROVIDERS = ("openai", "anthropic", "qwen", "minimax", "minimax_cn", "gemini")
+SUPPORTED_PROVIDERS = ("openai", "anthropic", "qwen", "minimax", "minimax_cn", "gemini", "groq", "openrouter")
 MINIMAX_PROVIDER_CONFIG = {
     "minimax": {
         "label": "MiniMax",
@@ -89,9 +90,9 @@ class TradingGraph:
         if provider == "openai":
             # First check if API key is provided in config
             api_key = self.config.get("api_key")
-            
-            # If not in config, check environment variable
-            if not api_key:
+
+            # If not in config, check environment variable ("sk-" is the DEFAULT_CONFIG placeholder)
+            if not api_key or api_key == "sk-":
                 api_key = os.environ.get("OPENAI_API_KEY")
             
             # Validate the API key
@@ -197,6 +198,44 @@ class TradingGraph:
                     "Please provide your actual Google Gemini API key. "
                     "You can get one from: https://ai.google.dev/"
                 )
+        elif provider == "groq":
+            api_key = self.config.get("groq_api_key")
+
+            if not api_key:
+                api_key = os.environ.get("GROQ_API_KEY")
+
+            if not api_key:
+                raise ValueError(
+                    "Groq API key not found. Please set it using one of these methods:\n"
+                    "1. Set environment variable: export GROQ_API_KEY='your-key-here'\n"
+                    "2. Update the config with: config['groq_api_key'] = 'your-key-here'\n"
+                    "3. Use the web interface to update the API key"
+                )
+
+            if api_key == "":
+                raise ValueError(
+                    "Please provide your actual Groq API key. "
+                    "You can get one from: https://console.groq.com/keys"
+                )
+        elif provider == "openrouter":
+            api_key = self.config.get("openrouter_api_key")
+
+            if not api_key:
+                api_key = os.environ.get("OPENROUTER_API_KEY")
+
+            if not api_key:
+                raise ValueError(
+                    "OpenRouter API key not found. Please set it using one of these methods:\n"
+                    "1. Set environment variable: export OPENROUTER_API_KEY='your-key-here'\n"
+                    "2. Update the config with: config['openrouter_api_key'] = 'your-key-here'\n"
+                    "3. Use the web interface to update the API key"
+                )
+
+            if api_key == "":
+                raise ValueError(
+                    "Please provide your actual OpenRouter API key. "
+                    "You can get one from: https://openrouter.ai/keys"
+                )
         else:
             raise ValueError(f"Unsupported provider: {provider}. Must be one of {', '.join(SUPPORTED_PROVIDERS)}")
 
@@ -219,6 +258,16 @@ class TradingGraph:
         api_key = self._get_api_key(provider)
 
         if provider == "openai":
+            if model.startswith(("gpt-6-luna", "gpt-6-sol")):
+                # GPT-6 Luna and Sol allow tool calls in Chat Completions only with reasoning_effort="none",
+                # and langchain-openai would otherwise send gpt-6 requests with tools to the Responses API.
+                return ChatOpenAI(
+                    model=model,
+                    temperature=temperature,
+                    api_key=api_key,
+                    reasoning_effort="none",
+                    use_responses_api=False,
+                )
             return ChatOpenAI(
                 model=model,
                 temperature=temperature,
@@ -251,11 +300,36 @@ class TradingGraph:
                 openai_api_base=MINIMAX_PROVIDER_CONFIG[provider]["base_url"],
             )
         elif provider == "gemini":
+            # return ChatOpenAI(
+            #     model=model,
+            #     temperature=temperature,
+            #     api_key=api_key,
+            #     openai_api_base="https://generativelanguage.googleapis.com/v1beta/openai/",
+            # )
+            return ChatGoogleGenerativeAI(
+                model=model,
+                temperature=temperature,
+                google_api_key=api_key,
+            )
+        elif provider == "groq":
+            # Groq uses an OpenAI-compatible API.
+            # Its reasoning models put <think> text in the reply content by default; "hidden" drops it
+            # so the reports and the final JSON decision stay clean.
             return ChatOpenAI(
                 model=model,
                 temperature=temperature,
                 api_key=api_key,
-                openai_api_base="https://generativelanguage.googleapis.com/v1beta/openai/",
+                openai_api_base="https://api.groq.com/openai/v1",
+                extra_body={"reasoning_format": "hidden"},
+            )
+        elif provider == "openrouter":
+            # OpenRouter uses an OpenAI-compatible API.
+            # It returns reasoning in a separate field, so the reply content has no <think> text.
+            return ChatOpenAI(
+                model=model,
+                temperature=temperature,
+                api_key=api_key,
+                openai_api_base="https://openrouter.ai/api/v1",
             )
         else:
             raise ValueError(f"Unsupported provider: {provider}. Must be one of {', '.join(SUPPORTED_PROVIDERS)}")
@@ -352,6 +426,12 @@ class TradingGraph:
         elif provider == "gemini":
             self.config["gemini_api_key"] = api_key
             os.environ["GOOGLE_API_KEY"] = api_key
+        elif provider == "groq":
+            self.config["groq_api_key"] = api_key
+            os.environ["GROQ_API_KEY"] = api_key
+        elif provider == "openrouter":
+            self.config["openrouter_api_key"] = api_key
+            os.environ["OPENROUTER_API_KEY"] = api_key
         else:
             raise ValueError(f"Unsupported provider: {provider}. Must be one of {', '.join(SUPPORTED_PROVIDERS)}")
         

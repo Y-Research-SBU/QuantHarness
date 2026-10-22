@@ -1,0 +1,10 @@
+-r requirements.txt
+
+numpy==2.4.6
+pandas==3.0.6
+TA-Lib==0.8.2
+xgboost==3.2.0
+ipykernel
+scikit-learn==1.9.1
+python-dotenv
+langchain-google-genai==4.4.2

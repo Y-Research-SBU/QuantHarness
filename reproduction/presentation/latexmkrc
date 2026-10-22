@@ -1,0 +1,9 @@
+$latex = 'xelatex';
+$dvipdf = 'xdvipdfmx %O -o %D %S';
+$bibtex = "pbibtex %O %B";
+$makeindex = "mendex %O -p $D %S";
+$pdf_mode = 5;
+
+# Editors (e.g. LaTeX Workshop) often pass -pdf, which overrides $pdf_mode
+# and runs $pdflatex; point it at xelatex too, since zxjatype requires XeTeX.
+$pdflatex = 'xelatex %O %S';

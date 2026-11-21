@@ -4,6 +4,7 @@ pandas
 numpy
 matplotlib
 mplfinance
+six  # imported by mplfinance but not declared in its install_requires
 scipy
 TA-Lib
 langchain
